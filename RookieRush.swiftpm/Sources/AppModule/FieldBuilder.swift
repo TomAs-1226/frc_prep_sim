@@ -46,6 +46,51 @@ enum FieldBuilder {
         let m = SCNMaterial(); m.diffuse.contents = UIColor(white: 0.95, alpha: 1); return m
     }()
 
+    // Branch level colors (shared across all reef branches)
+    private static let branchL2Mat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(red: 0.3, green: 0.7, blue: 0.4, alpha: 1); return m
+    }()
+    private static let branchL3Mat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(red: 0.7, green: 0.6, blue: 0.2, alpha: 1); return m
+    }()
+    private static let branchL4Mat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(red: 0.8, green: 0.3, blue: 0.3, alpha: 1); return m
+    }()
+
+    // Trough material
+    private static let troughMat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(red: 0.25, green: 0.60, blue: 0.45, alpha: 0.8); return m
+    }()
+
+    // Reef wall materials per alliance
+    private static let redReefWallMat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(red: 0.5, green: 0.12, blue: 0.12, alpha: 0.35); return m
+    }()
+    private static let blueReefWallMat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(red: 0.12, green: 0.15, blue: 0.5, alpha: 0.35); return m
+    }()
+
+    // Chain material
+    private static let chainMat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(white: 0.5, alpha: 0.6); return m
+    }()
+
+    // Coral / Algae materials
+    private static let coralMat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(red: 0.95, green: 0.90, blue: 0.85, alpha: 1); return m
+    }()
+    private static let algaeMat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.85); return m
+    }()
+
+    // AprilTag inner material
+    private static let tagInnerMat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(white: 0.1, alpha: 1); return m
+    }()
+
+    // Shared low-poly segment count for small cylinders
+    private static let lowSegments: Int = 12
+
     // MARK: - Build Scene
 
     static func buildScene() -> (scene: SCNScene, reefNodes: [SCNNode]) {
@@ -132,14 +177,14 @@ enum FieldBuilder {
         dir.light?.castsShadow = true; dir.light?.shadowRadius = 3
         dir.light?.shadowMapSize = CGSize(width: 2048, height: 2048)
         dir.position = SCNVector3(3, 12, 5)
-        dir.eulerAngles = SCNVector3(-.pi / 3, .pi / 8, 0)
+        dir.eulerAngles = SCNVector3(-Float.pi / 3, Float.pi / 8, 0)
         scene.rootNode.addChildNode(dir)
 
         // Fill light (softer, from opposite side)
         let fill = SCNNode(); fill.light = SCNLight()
         fill.light?.type = .directional; fill.light?.intensity = 300
         fill.position = SCNVector3(-3, 8, -4)
-        fill.eulerAngles = SCNVector3(-.pi / 4, -.pi / 6, 0)
+        fill.eulerAngles = SCNVector3(-Float.pi / 4, -Float.pi / 6, 0)
         scene.rootNode.addChildNode(fill)
     }
 
@@ -228,10 +273,7 @@ enum FieldBuilder {
             // Translucent wall panel
             let wallGeo = SCNBox(width: CGFloat(edgeLen), height: CGFloat(pipeH * 0.15),
                                   length: 0.01, chamferRadius: 0)
-            let wallColor = alliance == .red
-                ? UIColor(red: 0.5, green: 0.12, blue: 0.12, alpha: 0.35)
-                : UIColor(red: 0.12, green: 0.15, blue: 0.5, alpha: 0.35)
-            let wm = SCNMaterial(); wm.diffuse.contents = wallColor; wallGeo.materials = [wm]
+            wallGeo.materials = [alliance == .red ? redReefWallMat : blueReefWallMat]
             let wallNode = SCNNode(geometry: wallGeo)
             wallNode.position = SCNVector3((v1.x + v2.x) / 2, pipeH * 0.075, (v1.y + v2.y) / 2)
             wallNode.eulerAngles.y = angle
@@ -240,9 +282,7 @@ enum FieldBuilder {
             // L1 trough at base of face
             let troughGeo = SCNBox(width: CGFloat(edgeLen * 0.7), height: 0.025,
                                     length: CGFloat(FieldSpec.troughDepth), chamferRadius: 0.005)
-            let tm = SCNMaterial()
-            tm.diffuse.contents = UIColor(red: 0.25, green: 0.60, blue: 0.45, alpha: 0.8)
-            troughGeo.materials = [tm]
+            troughGeo.materials = [troughMat]
             let troughNode = SCNNode(geometry: troughGeo)
             let face = faces[i]
             let outward: Float = 0.03
@@ -258,26 +298,32 @@ enum FieldBuilder {
         }
 
         // Build scoring pipes (12 per reef, 2 per face)
+        // Shared geometry (all pipes identical, all branches identical per level)
+        let sharedPipeGeo = SCNCylinder(radius: CGFloat(FieldSpec.reefPipeRadius), height: CGFloat(pipeH))
+        sharedPipeGeo.radialSegmentCount = lowSegments
+        sharedPipeGeo.materials = [pipeMat]
+
+        let sharedBranchGeo = SCNCylinder(radius: CGFloat(FieldSpec.branchRadius),
+                                           height: CGFloat(FieldSpec.branchLength))
+        sharedBranchGeo.radialSegmentCount = lowSegments
+
+        let branchMats: [Int: SCNMaterial] = [2: branchL2Mat, 3: branchL3Mat, 4: branchL4Mat]
+
         let pipes = FieldSpec.reefPipes(center: center)
         for (pIdx, pipe) in pipes.enumerated() {
-            let pipeGeo = SCNCylinder(radius: CGFloat(FieldSpec.reefPipeRadius), height: CGFloat(pipeH))
-            pipeGeo.materials = [pipeMat]
-            let pipeNode = SCNNode(geometry: pipeGeo)
+            let pipeNode = SCNNode(geometry: sharedPipeGeo)
             pipeNode.position = SCNVector3(pipe.position.x, pipeH / 2, pipe.position.y)
             root.addChildNode(pipeNode)
 
             // Branches at L2, L3, L4
             for (level, height) in [(2, FieldSpec.branchL2), (3, FieldSpec.branchL3), (4, FieldSpec.branchL4)] {
-                let brGeo = SCNCylinder(radius: CGFloat(FieldSpec.branchRadius),
-                                         height: CGFloat(FieldSpec.branchLength))
-                let brMat = SCNMaterial()
-                switch level {
-                case 2: brMat.diffuse.contents = UIColor(red: 0.3, green: 0.7, blue: 0.4, alpha: 1)
-                case 3: brMat.diffuse.contents = UIColor(red: 0.7, green: 0.6, blue: 0.2, alpha: 1)
-                default: brMat.diffuse.contents = UIColor(red: 0.8, green: 0.3, blue: 0.3, alpha: 1)
+                let brNode = SCNNode(geometry: sharedBranchGeo)
+                // Per-node material override via geometry copy only when needed
+                if let mat = branchMats[level] {
+                    let brGeo = sharedBranchGeo.copy() as! SCNCylinder
+                    brGeo.materials = [mat]
+                    brNode.geometry = brGeo
                 }
-                brGeo.materials = [brMat]
-                let brNode = SCNNode(geometry: brGeo)
                 // Branch extends outward from pipe
                 let outX = cos(pipe.faceAngle) * FieldSpec.branchLength / 2
                 let outZ = sin(pipe.faceAngle) * FieldSpec.branchLength / 2
@@ -292,6 +338,7 @@ enum FieldBuilder {
 
         // Reef zone indicator ring on floor
         let zoneGeo = SCNTorus(ringRadius: CGFloat(FieldSpec.reefApothem + 0.15), pipeRadius: 0.008)
+        zoneGeo.ringSegmentCount = 24; zoneGeo.pipeSegmentCount = 8
         let zoneMat = SCNMaterial()
         zoneMat.diffuse.contents = (alliance == .red)
             ? UIColor.red.withAlphaComponent(0.2)
@@ -364,9 +411,8 @@ enum FieldBuilder {
                 let chainLen = height - cageY - FieldSpec.cageHeight
                 if chainLen > 0 {
                     let chain = SCNCylinder(radius: 0.004, height: CGFloat(chainLen))
-                    let chMat = SCNMaterial()
-                    chMat.diffuse.contents = UIColor(white: 0.5, alpha: 0.6)
-                    chain.materials = [chMat]
+                    chain.radialSegmentCount = 6
+                    chain.materials = [chainMat]
                     let chNode = SCNNode(geometry: chain)
                     chNode.position = SCNVector3(xSign * 0.15,
                                                   cageY + FieldSpec.cageHeight + chainLen / 2, zOff)
@@ -462,8 +508,7 @@ enum FieldBuilder {
         pn.position = SCNVector3(pos.x, 0.10, wallZ)
         root.addChildNode(pn)
 
-        let label = alliance == .red ? "PROCESSOR" : "PROCESSOR"
-        addText(label, at: SCNVector3(pos.x, 0.015, pos.y + (onFarWall ? -0.15 : 0.15)),
+        addText("PROCESSOR", at: SCNVector3(pos.x, 0.015, pos.y + (onFarWall ? -0.15 : 0.15)),
                 color: alliance.uiColor.withAlphaComponent(0.5), size: 0.04, to: root)
     }
 
@@ -483,9 +528,7 @@ enum FieldBuilder {
 
             // Inner black pattern (simplified as a smaller dark square)
             let inner = SCNBox(width: CGFloat(size * 0.75), height: CGFloat(size * 0.75), length: 0.004, chamferRadius: 0)
-            let innerMat = SCNMaterial()
-            innerMat.diffuse.contents = UIColor(white: 0.1, alpha: 1)
-            inner.materials = [innerMat]
+            inner.materials = [tagInnerMat]
             let innerNode = SCNNode(geometry: inner)
             innerNode.position.z = 0.001
             tagNode.addChildNode(innerNode)
@@ -553,17 +596,15 @@ enum FieldBuilder {
 
     static func makeCoral() -> SCNNode {
         let geo = SCNCylinder(radius: CGFloat(FieldSpec.coralRadius), height: CGFloat(FieldSpec.coralLength))
-        let mat = SCNMaterial()
-        mat.diffuse.contents = UIColor(red: 0.95, green: 0.90, blue: 0.85, alpha: 1)
-        geo.materials = [mat]
+        geo.radialSegmentCount = lowSegments
+        geo.materials = [coralMat]
         return SCNNode(geometry: geo)
     }
 
     static func makeAlgae() -> SCNNode {
         let geo = SCNSphere(radius: CGFloat(FieldSpec.algaeRadius))
-        let mat = SCNMaterial()
-        mat.diffuse.contents = UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.85)
-        geo.materials = [mat]
+        geo.segmentCount = lowSegments
+        geo.materials = [algaeMat]
         return SCNNode(geometry: geo)
     }
 
@@ -655,6 +696,7 @@ enum RobotBuilder {
                           (-cW/2 + 0.03, cL/2 - 0.04), (cW/2 - 0.03, cL/2 - 0.04)] {
             // Swerve module housing
             let housing = SCNCylinder(radius: 0.025, height: 0.02)
+            housing.radialSegmentCount = 12
             let hMat = SCNMaterial(); hMat.diffuse.contents = UIColor(white: 0.3, alpha: 1)
             housing.materials = [hMat]
             let hn = SCNNode(geometry: housing)
@@ -663,6 +705,7 @@ enum RobotBuilder {
 
             // Wheel
             let wheel = SCNCylinder(radius: wheelR, height: wheelH)
+            wheel.radialSegmentCount = 12
             wheel.materials = [wMat]
             let wn = SCNNode(geometry: wheel)
             wn.eulerAngles.z = .pi / 2
@@ -680,6 +723,7 @@ enum RobotBuilder {
         for side: CGFloat in [-1, 1] {
             for zOff: CGFloat in [-cL/2 + 0.05, 0, cL/2 - 0.05] {
                 let wheel = SCNCylinder(radius: wheelR, height: wheelH)
+                wheel.radialSegmentCount = 12
                 wheel.materials = [wMat]
                 let wn = SCNNode(geometry: wheel)
                 wn.eulerAngles.z = .pi / 2
@@ -740,7 +784,7 @@ enum RobotBuilder {
 
         // Arm (angled tube)
         let armLen: Float = 0.28
-        let arm = SCNCylinder(radius: 0.012, height: CGFloat(armLen))
+        let arm = SCNCylinder(radius: 0.012, height: CGFloat(armLen)); arm.radialSegmentCount = 8
         let aMat = SCNMaterial(); aMat.diffuse.contents = UIColor.systemOrange; arm.materials = [aMat]
         let armNode = SCNNode(geometry: arm)
         armNode.position = SCNVector3(0, pivotY + armLen * 0.4, 0.02)
@@ -757,7 +801,7 @@ enum RobotBuilder {
         root.addChildNode(gripNode)
 
         // Pivot base
-        let base = SCNCylinder(radius: 0.025, height: 0.03)
+        let base = SCNCylinder(radius: 0.025, height: 0.03); base.radialSegmentCount = 12
         let bMat = SCNMaterial(); bMat.diffuse.contents = UIColor(white: 0.35, alpha: 1)
         base.materials = [bMat]
         let bn = SCNNode(geometry: base)
@@ -767,7 +811,7 @@ enum RobotBuilder {
 
     private static func addLowIntake(to root: SCNNode, baseY: Float, cL: Float, color: UIColor) {
         // Front roller intake
-        let roller = SCNCylinder(radius: 0.028, height: 0.22)
+        let roller = SCNCylinder(radius: 0.028, height: 0.22); roller.radialSegmentCount = 12
         let rMat = SCNMaterial(); rMat.diffuse.contents = UIColor.systemTeal; roller.materials = [rMat]
         let rn = SCNNode(geometry: roller)
         rn.eulerAngles.z = .pi / 2
