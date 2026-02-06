@@ -1,60 +1,69 @@
-# Rookie Rush: Level 1
+# Match Coach: Reefscape Strategy Lab
 
-A Swift Playground App (.swiftpm) that teaches new FRC (FIRST Robotics Competition) students the core loop of **Strategy + Build + Run** through an interactive, guided simulation experience.
+A Swift Playground App (.swiftpm) that teaches FRC (FIRST Robotics Competition) strategy through an interactive 6-robot match simulation. Act as alliance strategist, make real-time decisions, and learn from AI-powered coaching.
 
 ## The Problem
 
-New FRC students are overwhelmed by the complexity of competitive robotics — strategy decisions, robot design tradeoffs, autonomous routines, and match dynamics all hit at once. Rookie Rush provides a fast, low-pressure, interactive introduction where users experience these concepts firsthand in under 3 minutes.
+New FRC students are overwhelmed by strategy decisions, robot roles, autonomous routines, and alliance coordination. Match Coach provides a fast, low-pressure, interactive simulation where users experience these concepts firsthand — leading a 3-robot alliance against 3 opponents in under 3 minutes.
 
 ## How the 3-Minute Loop Works
 
-The experience flows through 5 guided steps:
+### 1. Welcome + Onboarding (~15 seconds)
+First-launch onboarding introduces FRC concepts. The intro screen explains the three-step flow: pick strategy, choose role & auto, watch the match.
 
-### 1. Welcome + Tutorial (~15 seconds)
-A single screen explains the three-step loop: choose a build, choose an auto, run the sim, get feedback. Simple step cards with icons guide the user.
+### 2. Pre-Match Strategy (~30-45 seconds)
+Three sequential choices determine how the match plays out:
 
-### 2. Build Choice (~30–45 seconds)
-Select one of three robot archetypes, each with distinct tradeoffs:
+**Alliance Strategy** — How your 3-robot team approaches the match:
+| Strategy | Scoring Weight | Defense Weight | Style |
+|----------|---------------|----------------|-------|
+| **Aggressive Scoring** | 90% | 5% | All-in offense, high risk |
+| **Balanced** | 60% | 20% | Adaptable, mix of both |
+| **Defense + Cycles** | 40% | 45% | Slow opponents, efficient cycling |
 
-| Archetype | Speed | Scoring | Reliability |
-|-----------|-------|---------|-------------|
-| **Speedy Drivetrain** | High | Low | 75% |
-| **Balanced** | Medium | Medium | 90% |
-| **Heavy Scorer** | Low | High | 97% |
+**Robot Role** — Your robot's function on the alliance:
+- **Scorer** — Accurate piece placement, slower but efficient
+- **Cycler** — Fast pickup and delivery, high throughput
+- **Defender** — Blocks opponents, scores opportunistically
 
-A 3D preview (procedural SceneKit geometry) shows each robot rotating in real-time. Stat bars visualize the tradeoffs.
+**Auto Routine** — 15-second autonomous program:
+- **Safe** — Cross line + 1 piece (95% success)
+- **Moderate** — 2 pieces (75% success)
+- **Risky** — 3 pieces (45% success)
 
-### 3. Auto Choice (~30–45 seconds)
-Select one of three autonomous routines:
+### 3. Match Simulation (~45-60 seconds)
+A compressed 150-second match runs at 2x speed on a 3D REEFSCAPE-inspired field:
+- 6 robots (3 red, 3 blue) with AI state machines driving simultaneously
+- Auto, Teleop, and Endgame periods with distinct behaviors
+- Robots pick up, deliver, and score game pieces at reef nodes and processors
+- Collision avoidance and defender interactions slow opponents
+- Endgame barge parking for bonus points
 
-- **Taxi + 1 Score** — Low risk, safe points (up to 7 pts)
-- **2 Score** — Medium risk, more nodes (up to 12 pts)
-- **Risky Sprint** — High risk, all 3 nodes (up to 17 pts)
+**Player Controls During Match:**
+- **Slow-Mo Coaching** — Activates 0.3x speed with contextual coaching tips
+- **3 Callouts** — Strategic mid-match adjustments:
+  - "Prioritize Reef" — Boost scoring weight
+  - "Switch to Defense" — Shift to defensive play
+  - "Endgame Early" — Rush to barge for climb points
 
-A strategy tip explains risk vs. reward tradeoffs.
+### 4. Results + AI Coaching (~20-30 seconds)
+- Red vs Blue score comparison with animated reveal
+- Score breakdown: Auto / Teleop / Endgame for each alliance
+- Player robot stats: pieces scored, cycles, stalls
+- Strategy choices recap
+- Personalized AI coaching analysis
 
-### 4. Run Simulation (~45–60 seconds)
-A compressed match simulation runs at 2x speed on a simplified 3D field:
-- Robot moves along waypoints with smooth interpolation
-- Speed, scoring time, and reliability are driven by build stats
-- Scoring triggers visual pulses on field nodes
-- A live scoreboard shows points, time, and current robot activity
-- Stalls can occur based on reliability + auto risk
+**AI Coaching:** On iOS 26+ with Apple Intelligence, coaching uses on-device Foundation Models for natural-language feedback. Falls back to comprehensive rule-based analysis on all other devices — fully offline either way.
 
-### 5. Results + Coaching (~20–30 seconds)
-Results screen shows total points, nodes scored, and stall status. Personalized coaching feedback explains what worked and suggests one improvement.
+## How Choices Affect the Simulation
 
-**AI Coaching:** On iOS 26+ devices with Apple Intelligence enabled, coaching uses Apple's on-device Foundation Models (LanguageModelSession) for natural-language feedback. Falls back to comprehensive rule-based coaching on all other devices — fully offline either way.
+- **Alliance Strategy** sets policy weights for all 3 red robots (scoring vs defense vs endgame)
+- **Robot Role** determines your robot's stats (speed, scoring time, pickup time, reliability)
+- **Auto Plan** controls autonomous aggressiveness and stall risk
+- **Callouts** dynamically modify policy weights mid-match
+- **Slow-Mo** provides coaching insights without changing outcomes
 
-## How Build + Auto Choices Affect the Sim
-
-- **maxSpeed** → Travel time between waypoints (faster = less time driving)
-- **scoringTime** → Dwell time at each scoring node (lower = more efficient scoring)
-- **reliability** → Probability of avoiding stalls during risky autos
-- **failureChance** → Per-auto risk of triggering a stall (higher for aggressive autos)
-- **pickupTime** → Time to pick up game pieces at field locations
-
-The combination creates 9 distinct play experiences (3 archetypes x 3 autos) with meaningfully different outcomes.
+The combination creates 27 distinct play experiences (3 strategies x 3 roles x 3 autos) with meaningfully different outcomes. Callouts add further variation.
 
 ## Technical Architecture
 
@@ -64,36 +73,49 @@ RookieRush.swiftpm/
   Sources/AppModule/
     RookieRushApp.swift            # App entry point with onboarding gate
     ContentView.swift              # Main flow coordinator (state machine)
-    GameModels.swift               # GamePhase, RobotArchetype, AutoPlan, etc.
-    SimulationEngine.swift         # Core sim: waypoints, timing, scoring
-    FieldBuilder.swift             # Procedural 3D field (SceneKit)
+    GameModels.swift               # All data types, field layout, robot factory
+    SimulationEngine.swift         # RobotAgent AI + MatchEngine (6-robot orchestrator)
+    FieldBuilder.swift             # Procedural 3D field (SceneKit) + RobotBuilder
     AICoach.swift                  # Foundation Models + rule-based fallback
     GlassModifier.swift            # iOS 26 Liquid Glass conditional effects
     OnboardingView.swift           # First-launch onboarding
-    WelcomeView.swift              # Tutorial/welcome screen
-    BuildChoiceView.swift          # Robot archetype selector + 3D preview
-    AutoChoiceView.swift           # Auto routine selector
-    SimulationView.swift           # 3D sim view + live scoreboard
+    IntroView.swift                # Welcome/intro screen
+    PreMatchView.swift             # 3-step strategy selector
+    MatchView.swift                # 3D sim view + scoreboard + controls
+    CoachingPanel.swift            # Slow-mo coaching tip panel
     ResultsView.swift              # Results + AI coaching feedback
     SettingsView.swift             # User settings (speed, seed, AI toggle)
 ```
 
 ### Key Design Decisions
 
-- **SceneKit** for 3D rendering — more stable in Swift Playgrounds than RealityKit, fully supports code-only scene construction
-- **Procedural geometry only** — all robots and field elements built from SCNBox, SCNCylinder, SCNTorus, SCNText primitives. Zero imported assets
-- **Seeded RNG** (xorshift64) for deterministic simulation runs — same seed produces identical results for judging
-- **Kinematic movement** via SCNAction waypoint interpolation with easing curves
-- **SwiftUI overlays** on SceneKit for all UI (menus, scoreboard, buttons)
-- **iOS 26 Liquid Glass** applied conditionally via `GlassModifier` — graceful degradation on older iOS
-- **Foundation Models** integration with `#if canImport(FoundationModels)` guards and `@available(iOS 26.0, *)` checks
+- **SceneKit** for 3D rendering — more stable in Swift Playgrounds than RealityKit
+- **Procedural geometry only** — all 6 robot types and field elements built from SCNBox, SCNCylinder, SCNTorus, SCNSphere, SCNText. Zero imported assets
+- **Timer-based 30fps game loop** for 6-robot simultaneous kinematic movement
+- **Robot AI state machines** with policy weight-based goal selection (scoring/defense/endgame)
+- **Simple collision avoidance** via pairwise separation resolution
+- **Seeded RNG** (xorshift64) for deterministic simulation runs
+- **SwiftUI overlays** on SceneKit for all UI (scoreboard, callouts, coaching panel)
+- **iOS 26 Liquid Glass** applied conditionally via `GlassModifier`
+- **Foundation Models** integration with `#if canImport(FoundationModels)` guards
+- **`swiftLanguageMode(.v5)`** to avoid strict concurrency issues with Timer/SceneKit callbacks
+
+### Robot Superstructure Types
+
+Each robot has a visually distinct superstructure built from primitives:
+1. **Elevator** — Tall vertical rails with a claw at top
+2. **Arm** — Articulated arm with gripper
+3. **Intake** — Front roller with guard plate
+4. **Dual Rail** — Double elevator with hopper tray
+5. **Turret Intake** — Rotating turret base with extending arm
+6. **Wedge** — Low wedge with push plate (defender)
 
 ### Accessibility
 
 - All buttons include `.accessibilityLabel()` for VoiceOver
-- Scoreboard elements are grouped with `.accessibilityElement(children: .combine)`
+- Scoreboard and coaching panels use `.accessibilityElement(children: .combine)`
 - High contrast mode option in Settings
-- Legible text with high contrast against dark backgrounds
+- Selection cards have `.accessibilityAddTraits(.isSelected)`
 - Simple tap-based controls — no complex gestures required
 
 ## Requirements
@@ -105,4 +127,4 @@ RookieRush.swiftpm/
 
 ## Credits
 
-Built for the Apple Swift Student Challenge 2026. Inspired by the FRC community's spirit of helping rookies learn through hands-on experience.
+Built for the Apple Swift Student Challenge 2026. Inspired by the FRC community's spirit of helping rookies learn through hands-on strategy experience.

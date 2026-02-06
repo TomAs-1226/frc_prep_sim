@@ -8,8 +8,7 @@ import FoundationModels
 // MARK: - AI Coach
 
 /// Provides coaching feedback using Apple's on-device Foundation Models (iOS 26+).
-/// Gracefully falls back to comprehensive rule-based feedback when the model
-/// is unavailable (older devices, Apple Intelligence disabled, or non-iOS 26 SDK).
+/// Falls back to comprehensive rule-based feedback when the model is unavailable.
 @MainActor
 final class AICoach: ObservableObject {
     @Published var coachingText: String = ""
@@ -22,7 +21,6 @@ final class AICoach: ObservableObject {
 
     // MARK: - Availability Check
 
-    /// Determine if on-device Foundation Models are available.
     func checkAvailability() {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, *) {
@@ -37,7 +35,6 @@ final class AICoach: ObservableObject {
         #endif
     }
 
-    /// Prewarm the model to reduce first-token latency.
     func prewarm() {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, *), isAIAvailable {
@@ -49,11 +46,9 @@ final class AICoach: ObservableObject {
         #endif
     }
 
-    // MARK: - Generate Feedback
+    // MARK: - Generate Feedback (Match-Level)
 
-    /// Generate coaching feedback for a simulation result.
-    /// Attempts AI-powered generation first, falls back to rules if unavailable.
-    func generateFeedback(for result: SimulationResult) async {
+    func generateFeedback(for result: MatchResult) async {
         isGenerating = true
         defer { isGenerating = false }
 
@@ -64,12 +59,11 @@ final class AICoach: ObservableObject {
                 coachingText = text
                 return
             } catch {
-                // AI generation failed — fall through to rule-based
+                // Fall through to rule-based
             }
         }
         #endif
 
-        // Fallback: rule-based coaching (always works, offline, instant)
         coachingText = generateRuleBasedFeedback(for: result)
     }
 
@@ -77,20 +71,21 @@ final class AICoach: ObservableObject {
 
     #if canImport(FoundationModels)
     @available(iOS 26.0, *)
-    private func generateAIFeedback(for result: SimulationResult) async throws -> String {
+    private func generateAIFeedback(for result: MatchResult) async throws -> String {
         let session = LanguageModelSession(
             instructions: """
             You are a friendly, encouraging FRC (FIRST Robotics Competition) mentor \
-            coaching a brand-new rookie student. They just ran a simplified match simulation \
-            in an educational app called "Rookie Rush." \
+            coaching a brand-new rookie student. They just ran a 6-robot match simulation \
+            in an educational app called "Match Coach: Reefscape Strategy Lab." \
             \
-            Give a 2-3 sentence response that: \
-            1. Acknowledges what went well in their run. \
-            2. Gives one specific, actionable suggestion for their next attempt. \
+            Give a 3-4 sentence response that: \
+            1. Comments on their strategy choices and the match outcome. \
+            2. Highlights one thing that worked well. \
+            3. Gives one specific, actionable suggestion for their next match. \
             \
-            Be warm but concise. Use simple language — they're new to robotics. \
+            Be warm but concise. Use simple language. \
             Don't use jargon without briefly explaining it. \
-            Never be discouraging. Frame failures as learning opportunities.
+            Frame losses as learning opportunities.
             """
         )
 
@@ -102,88 +97,115 @@ final class AICoach: ObservableObject {
 
     // MARK: - Prompt Builder
 
-    private func buildPrompt(for result: SimulationResult) -> String {
-        let stallNote = result.didStall
-            ? "The robot stalled (temporarily froze) during the run, losing time."
-            : "The robot did not stall — it ran smoothly the whole time."
+    private func buildPrompt(for result: MatchResult) -> String {
+        let outcome = result.playerWon ? "won by \(result.margin) points" :
+            (result.margin == 0 ? "tied" : "lost by \(result.margin) points")
+        let stallNote = result.didPlayerStall
+            ? "Their robot stalled during the match."
+            : "Their robot ran smoothly without stalling."
+        let calloutNote = result.calloutsUsed.isEmpty
+            ? "They didn't use any mid-match callouts."
+            : "They used these callouts: \(result.calloutsUsed.map { $0.rawValue }.joined(separator: ", "))."
 
         return """
-        The student chose the "\(result.archetype.rawValue)" robot and the \
-        "\(result.autoPlan.rawValue)" autonomous routine.
+        The student chose "\(result.playerStrategy.rawValue)" alliance strategy, \
+        "\(result.playerRole.rawValue)" robot role, and "\(result.playerAuto.rawValue)" auto routine.
 
         Match results:
-        - Scored \(result.nodesScored) out of \(result.totalNodes) available scoring nodes
-        - Earned \(result.totalPoints) total points
-        - Used \(String(format: "%.0f", result.timeUsed)) seconds of \(String(format: "%.0f", result.totalTime)) total match time
+        - Red alliance (player's team) \(outcome)
+        - Red score: \(result.redScore) (Auto: \(result.redBreakdown.autoPoints), \
+        Teleop: \(result.redBreakdown.teleopPoints), Endgame: \(result.redBreakdown.endgamePoints))
+        - Blue score: \(result.blueScore) (Auto: \(result.blueBreakdown.autoPoints), \
+        Teleop: \(result.blueBreakdown.teleopPoints), Endgame: \(result.blueBreakdown.endgamePoints))
+        - Player's robot scored \(result.playerRobotScored) pieces and completed \(result.playerRobotCycled) cycles
         - \(stallNote)
+        - \(calloutNote)
+        - \(result.slowMoUsed ? "They used the slow-mo coaching feature." : "They didn't use slow-mo coaching.")
 
         What coaching feedback would you give?
         """
     }
 
-    // MARK: - Rule-Based Fallback Feedback
+    // MARK: - Rule-Based Fallback
 
-    /// Generates deterministic coaching feedback based on the result.
-    /// This runs instantly and works on all devices, no AI required.
-    func generateRuleBasedFeedback(for result: SimulationResult) -> String {
+    func generateRuleBasedFeedback(for result: MatchResult) -> String {
         var lines: [String] = []
 
-        let scoringRatio = result.totalNodes > 0
-            ? Double(result.nodesScored) / Double(result.totalNodes)
-            : 0
-
-        // -- Performance summary --
-        if scoringRatio >= 0.9 {
-            lines.append("Excellent run! You scored \(result.nodesScored) out of \(result.totalNodes) nodes for \(result.totalPoints) points — that's a strong performance for a rookie.")
-        } else if scoringRatio >= 0.5 {
-            lines.append("Solid effort! You scored \(result.nodesScored) out of \(result.totalNodes) nodes for \(result.totalPoints) points. You're getting the hang of this!")
+        // Match outcome
+        if result.playerWon && result.margin > 15 {
+            lines.append("Dominant victory! Your red alliance crushed it with \(result.redScore) points vs \(result.blueScore). Your strategy choices paid off big time.")
+        } else if result.playerWon {
+            lines.append("Nice win! \(result.redScore)-\(result.blueScore) — a \(result.margin)-point margin shows your strategy worked, though there's room to widen the gap.")
+        } else if result.margin == 0 {
+            lines.append("A tie at \(result.redScore)-\(result.blueScore)! In FRC, ties are rare and exciting. A small adjustment to your strategy could tip the balance next time.")
+        } else if result.margin < 10 {
+            lines.append("Close match! \(result.redScore)-\(result.blueScore) — just \(result.margin) points separated the alliances. Small strategic changes can flip a close loss into a win.")
         } else {
-            lines.append("You scored \(result.nodesScored) out of \(result.totalNodes) nodes for \(result.totalPoints) points. Every FRC team starts here — the key is learning from each run.")
+            lines.append("Tough loss at \(result.redScore)-\(result.blueScore). Don't worry — even top FRC teams lose matches. The key is analyzing what happened and adapting.")
         }
 
-        // -- Stall feedback --
-        if result.didStall {
-            lines.append("Your robot stalled mid-match, costing valuable seconds. In real FRC, reliability is often more important than raw speed. Risky autos are exciting, but teams that stall lose matches.")
-        }
-
-        // -- Archetype + Auto combo advice --
-        switch (result.archetype, result.autoPlan) {
-        case (.speedy, .riskySprint):
-            lines.append("Coaching tip: The Speedy Drivetrain is fast but fragile under pressure. Pair it with 'Taxi + 1 Score' for consistent early points, or try the Balanced bot with '2 Score' for a safer multi-node run.")
-
-        case (.speedy, .taxiPlusOne):
-            lines.append("Coaching tip: Speed + a safe auto is a reliable formula. You secured taxi points and a quick score. Next, try the Balanced bot with '2 Score' to explore how medium speed handles more ambitious routes.")
-
-        case (.speedy, .twoScore):
-            lines.append("Coaching tip: The Speedy bot covers ground fast, but its scoring ability is limited. At the nodes, it takes longer to score than the Balanced or Heavy bots. Try Balanced for a better all-around 2-score run.")
-
-        case (.balanced, .taxiPlusOne):
-            lines.append("Coaching tip: You played it safe — and that's smart for learning! But the Balanced bot can handle more. Try '2 Score' next to use its well-rounded stats and score more points without much extra risk.")
-
-        case (.balanced, .twoScore):
-            lines.append("Coaching tip: This is one of the strongest combos! The Balanced bot's medium speed and good reliability make 2-score autos very consistent. Many real FRC teams aim for exactly this kind of setup.")
-
-        case (.balanced, .riskySprint):
-            lines.append("Coaching tip: The Balanced bot can handle some risk, but the Risky Sprint pushes it hard. If you want to go for all 3 nodes, try the Heavy Scorer — its high reliability helps it power through without stalling.")
-
-        case (.heavy, .taxiPlusOne):
-            lines.append("Coaching tip: The Heavy Scorer is a powerhouse at the nodes, but Taxi + 1 doesn't fully use that strength. Try '2 Score' — the Heavy bot's fast scoring time at nodes more than compensates for its slower drive.")
-
-        case (.heavy, .twoScore):
-            lines.append("Coaching tip: Great strategy! The Heavy Scorer's reliability and fast scoring make 2-node runs very achievable. Watch the clock though — in tight matches, every second of drive time counts.")
-
-        case (.heavy, .riskySprint):
-            if result.nodesScored >= 2 {
-                lines.append("Coaching tip: The Heavy Scorer's reliability helped it survive the risky sprint! But notice how close to the time limit you got — in a real match, the 3rd node might not happen. Two reliable scores often beats a risky three.")
+        // Strategy analysis
+        switch result.playerStrategy {
+        case .aggressive:
+            if result.playerWon {
+                lines.append("Your aggressive strategy delivered high scoring. Watch out though — against teams with strong defense, this approach can backfire.")
             } else {
-                lines.append("Coaching tip: The Heavy Scorer is simply too slow for a full-field sprint. Its superpower is dominating when it arrives at a node — pair it with '2 Score' to play to its strengths.")
+                lines.append("The aggressive strategy generated offense but left you exposed. Consider \"Balanced\" or \"Defense + Cycles\" to control the match tempo.")
+            }
+        case .balanced:
+            lines.append("The balanced strategy is versatile — you had both scoring and some defensive coverage. To optimize, try tilting toward aggressive if opponents are weak scorers, or defensive if they're strong.")
+        case .defensive:
+            if result.playerWon {
+                lines.append("Defense won this match! Slowing opponents while your cyclers scored efficiently is a classic FRC strategy. Great call.")
+            } else {
+                lines.append("Your defense slowed opponents, but your scorers couldn't generate enough points. Defense only works when your alliance still cycles well — consider upgrading your scorer's role.")
             }
         }
 
-        // -- Time management insight --
-        let timeRatio = result.timeUsed / result.totalTime
-        if timeRatio < 0.65 && result.nodesScored < result.totalNodes {
-            lines.append("You finished with time to spare. In FRC, unused time means unused potential — consider a slightly more aggressive auto on your next run!")
+        // Role feedback
+        switch result.playerRole {
+        case .scorer:
+            if result.playerRobotScored >= 4 {
+                lines.append("Your scorer put up \(result.playerRobotScored) pieces — excellent output! Scorers win matches when they stay consistent.")
+            } else {
+                lines.append("Your scorer only placed \(result.playerRobotScored) pieces. Try the Cycler role for faster piece delivery, or pair a Scorer with an aggressive strategy for more opportunities.")
+            }
+        case .cycler:
+            if result.playerRobotCycled >= 5 {
+                lines.append("Great cycling! \(result.playerRobotCycled) cycles shows strong field movement. Cyclers are the backbone of high-scoring alliances.")
+            } else {
+                lines.append("With \(result.playerRobotCycled) cycles, there's room to improve throughput. Cyclers need clear lanes — try defensive strategy to open paths.")
+            }
+        case .defender:
+            lines.append("As a defender, your job was to slow opponents. Look at the blue score breakdown — if their teleop scoring was low, your defense worked!")
+        }
+
+        // Stall feedback
+        if result.didPlayerStall {
+            lines.append("Your robot stalled during the match. In FRC, reliability beats everything. Consider a safer auto routine — consistent points beat risky zeros.")
+        }
+
+        // Auto feedback
+        switch result.playerAuto {
+        case .safe:
+            if !result.didPlayerStall {
+                lines.append("Your safe auto delivered consistent points. Once you're comfortable, try moderate to push for more auto scoring.")
+            }
+        case .moderate:
+            lines.append("The moderate auto is a solid middle ground. In real FRC, this is what many competitive teams run — enough points without the stall risk.")
+        case .risky:
+            if result.didPlayerStall {
+                lines.append("The risky auto caused a stall. In competition, failed autos can cost matches. Try moderate next time — the reliability is worth more than the extra piece attempt.")
+            } else {
+                lines.append("You pulled off the risky auto without stalling — impressive! But remember, in a best-of-3 playoff, consistency matters more than one hot run.")
+            }
+        }
+
+        // Callout feedback
+        if result.calloutsUsed.isEmpty {
+            lines.append("Tip: Try using callouts during the match! They let you shift your alliance's strategy mid-game — a key skill for real FRC drive coaches.")
+        } else {
+            lines.append("Good use of callouts! You used \(result.calloutsUsed.count) strategic adjustments. In real FRC, drive coaches constantly adapt — you're thinking like one.")
         }
 
         return lines.joined(separator: "\n\n")

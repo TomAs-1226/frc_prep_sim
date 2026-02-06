@@ -2,53 +2,50 @@ import SwiftUI
 
 // MARK: - Onboarding View
 
-/// First-launch onboarding that introduces FRC concepts and app purpose.
+/// First-launch onboarding that introduces FRC concepts and the Match Coach app.
 struct OnboardingView: View {
     @Binding var hasCompletedOnboarding: Bool
     @State private var currentPage = 0
 
     private let pages: [(title: String, subtitle: String, icon: String, description: String)] = [
         (
-            "Welcome to Rookie Rush",
-            "Your FRC Journey Starts Here",
-            "graduationcap.fill",
-            "FIRST Robotics Competition (FRC) is where students design, build, and program robots to compete in exciting challenges. It can feel overwhelming at first — but that's what this app is for."
+            "Welcome to Match Coach",
+            "Reefscape Strategy Lab",
+            "gamecontroller.fill",
+            "FRC (FIRST Robotics Competition) is where students design, build, and program robots to compete in exciting challenges. This app teaches you how FRC strategy works through interactive match simulations."
         ),
         (
-            "The Core Loop",
-            "Strategy + Build + Run",
-            "arrow.triangle.2.circlepath",
-            "Every FRC team follows a loop: choose a strategy, build a robot to match, then run matches to test it. Success comes from understanding tradeoffs — speed vs. scoring power, risk vs. consistency."
+            "You're the Strategist",
+            "Lead Your Alliance",
+            "person.3.fill",
+            "In each match, you'll lead a 3-robot alliance. Choose your team's strategy, pick your robot's role and autonomous routine, then watch how your decisions play out against 3 opponents."
         ),
         (
-            "Your First Challenge",
-            "Level 1: Reef Zone",
-            "star.fill",
-            "You'll choose a robot build, pick an autonomous routine, and watch your robot compete on a simplified field. See how your choices affect performance — then try again with new strategies!"
+            "6 Robots, 1 Field",
+            "Real-Time Simulation",
+            "play.rectangle.fill",
+            "Watch all 6 robots compete on a REEFSCAPE-inspired field. Use slow-mo coaching to learn what's happening, and trigger strategic callouts to adjust mid-match — just like a real drive coach."
         ),
         (
-            "AI Coaching",
-            "Learn from Every Run",
+            "AI-Powered Coaching",
+            "Learn from Every Match",
             "brain.head.profile.fill",
-            "After each simulation, you'll receive personalized coaching feedback. On supported devices, this is powered by Apple's on-device AI — your data stays private and works fully offline."
+            "After each match, get personalized coaching feedback. On supported devices, this uses Apple's on-device AI. Your data stays private and everything works fully offline."
         ),
     ]
 
     var body: some View {
         ZStack {
-            // Background gradient
             LinearGradient(
                 colors: [
                     Color(red: 0.05, green: 0.05, blue: 0.12),
                     Color(red: 0.1, green: 0.08, blue: 0.18),
                 ],
-                startPoint: .top,
-                endPoint: .bottom
+                startPoint: .top, endPoint: .bottom
             )
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Page content
                 TabView(selection: $currentPage) {
                     ForEach(0..<pages.count, id: \.self) { index in
                         onboardingPage(pages[index])
@@ -58,7 +55,6 @@ struct OnboardingView: View {
                 .tabViewStyle(.page(indexDisplayMode: .always))
                 .animation(.easeInOut, value: currentPage)
 
-                // Bottom button
                 Button(action: {
                     if currentPage < pages.count - 1 {
                         withAnimation { currentPage += 1 }
@@ -75,11 +71,11 @@ struct OnboardingView: View {
                             RoundedRectangle(cornerRadius: 14)
                                 .fill(Color.orange)
                         )
+                        .modifier(GlassModifier(shape: RoundedRectangle(cornerRadius: 14)))
                 }
                 .accessibilityLabel(currentPage < pages.count - 1 ? "Next page" : "Start the app")
-                .padding(.bottom, 40)
+                .padding(.bottom, 16)
 
-                // Skip button
                 if currentPage < pages.count - 1 {
                     Button("Skip") {
                         withAnimation { hasCompletedOnboarding = true }

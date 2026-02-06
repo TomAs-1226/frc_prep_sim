@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Settings View
 
-/// User-configurable settings panel with simulation and accessibility options.
+/// User-configurable settings for simulation, AI, and accessibility.
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("simulationSpeed") private var simulationSpeed: Double = 2.0
@@ -15,11 +15,10 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                // Simulation Settings
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("Simulation Speed")
+                            Text("Default Speed")
                             Spacer()
                             Text("\(String(format: "%.1f", simulationSpeed))x")
                                 .font(.subheadline.monospacedDigit())
@@ -42,21 +41,18 @@ struct SettingsView: View {
 
                     Toggle("Sound Effects", isOn: $soundEnabled)
                         .tint(.orange)
-                        .accessibilityLabel("Sound effects \(soundEnabled ? "enabled" : "disabled")")
                 } header: {
-                    Label("Simulation", systemImage: "play.circle.fill")
+                    Label("Match Simulation", systemImage: "play.circle.fill")
                 }
 
-                // AI Features
                 Section {
                     Toggle("AI Coaching", isOn: $aiCoachingEnabled)
                         .tint(.orange)
-                        .accessibilityLabel("AI coaching \(aiCoachingEnabled ? "enabled" : "disabled")")
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("About AI Coaching")
                             .font(.subheadline.bold())
-                        Text("When available, coaching feedback is powered by Apple's on-device Foundation Models. All processing happens locally on your device — nothing is sent to the cloud. Falls back to rule-based coaching on unsupported devices.")
+                        Text("When available, post-match feedback is powered by Apple's on-device Foundation Models. All processing happens locally — nothing is sent to the cloud. Falls back to rule-based coaching on unsupported devices.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -64,16 +60,14 @@ struct SettingsView: View {
                     Label("Intelligence", systemImage: "brain.head.profile.fill")
                 }
 
-                // Accessibility
                 Section {
                     Toggle("High Contrast Mode", isOn: $highContrastMode)
                         .tint(.orange)
-                        .accessibilityLabel("High contrast mode \(highContrastMode ? "enabled" : "disabled")")
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Accessibility")
                             .font(.subheadline.bold())
-                        Text("All buttons and controls include VoiceOver labels. The simulation scoreboard is accessible and updates are announced. High contrast mode increases text and UI element visibility.")
+                        Text("All controls include VoiceOver labels. The scoreboard and coaching panel are accessible. High contrast mode increases UI element visibility.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -81,12 +75,11 @@ struct SettingsView: View {
                     Label("Accessibility", systemImage: "accessibility")
                 }
 
-                // About
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Rookie Rush: Level 1")
+                        Text("Match Coach: Reefscape Strategy Lab")
                             .font(.headline)
-                        Text("An interactive FRC onboarding experience that teaches the core loop of Strategy, Build, and Run through a simplified match simulation.")
+                        Text("An interactive FRC strategy experience where you lead a 3-robot alliance through a simulated REEFSCAPE match. Choose strategy, role, and auto — then watch how your decisions play out.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Text("Built for Swift Student Challenge 2026")

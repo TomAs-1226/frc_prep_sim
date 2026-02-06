@@ -2,249 +2,290 @@ import SwiftUI
 
 // MARK: - Results View
 
-/// Displays simulation results with AI-powered coaching feedback.
+/// Post-match results with score breakdown and AI coaching feedback.
 struct ResultsView: View {
-    let result: SimulationResult
+    let result: MatchResult
     let onTryAgain: () -> Void
+
     @StateObject private var coach = AICoach()
-    @State private var showDetails = false
+    @State private var showBreakdown = false
     @State private var animateScore = false
 
     var body: some View {
         ZStack {
-            // Background
             LinearGradient(
                 colors: [
                     Color(red: 0.05, green: 0.05, blue: 0.1),
                     Color(red: 0.08, green: 0.06, blue: 0.14),
                 ],
-                startPoint: .top,
-                endPoint: .bottom
+                startPoint: .top, endPoint: .bottom
             )
             .ignoresSafeArea()
 
             ScrollView {
                 VStack(spacing: 24) {
                     // Header
-                    VStack(spacing: 8) {
-                        Text("MATCH RESULTS")
-                            .font(.caption.bold())
-                            .foregroundStyle(.orange)
-                            .tracking(2)
+                    headerSection
+                        .padding(.top, 24)
 
-                        Text(headerEmoji)
-                            .font(.system(size: 48))
-                            .accessibilityHidden(true)
-
-                        Text(headerMessage)
-                            .font(.title2.bold())
-                            .foregroundStyle(.white)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(.top, 24)
-
-                    // Score card
-                    scoreCard
+                    // Score comparison
+                    scoreComparison
                         .padding(.horizontal, 20)
 
-                    // Details
-                    if showDetails {
-                        detailsCard
+                    // Score breakdown
+                    if showBreakdown {
+                        breakdownSection
                             .padding(.horizontal, 20)
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
+
+                    // Your choices
+                    choicesSection
+                        .padding(.horizontal, 20)
 
                     // AI Coaching
                     coachingCard
                         .padding(.horizontal, 20)
 
-                    // Actions
-                    VStack(spacing: 12) {
-                        Button(action: onTryAgain) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "arrow.counterclockwise")
-                                Text("Try Different Choices")
-                                    .font(.headline)
-                            }
-                            .foregroundStyle(.black)
-                            .frame(maxWidth: 280)
-                            .padding(.vertical, 14)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(Color.orange)
-                            )
+                    // Try again
+                    Button(action: onTryAgain) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.counterclockwise")
+                            Text("Try Different Strategy")
+                                .font(.headline)
                         }
-                        .accessibilityLabel("Try again with different robot and auto choices")
+                        .foregroundStyle(.black)
+                        .frame(maxWidth: 280)
+                        .padding(.vertical, 14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(Color.orange)
+                        )
+                        .modifier(GlassModifier(shape: RoundedRectangle(cornerRadius: 14)))
                     }
+                    .accessibilityLabel("Try again with different strategy choices")
                     .padding(.bottom, 40)
                 }
             }
         }
         .onAppear {
-            withAnimation(.easeOut(duration: 0.5).delay(0.3)) {
-                showDetails = true
-            }
             withAnimation(.spring(response: 0.6, dampingFraction: 0.7).delay(0.2)) {
                 animateScore = true
             }
-            Task {
-                await coach.generateFeedback(for: result)
+            withAnimation(.easeOut(duration: 0.5).delay(0.6)) {
+                showBreakdown = true
             }
+            Task { await coach.generateFeedback(for: result) }
         }
     }
 
-    // MARK: - Header Logic
+    // MARK: - Header
 
-    private var scoringRatio: Double {
-        result.totalNodes > 0 ? Double(result.nodesScored) / Double(result.totalNodes) : 0
-    }
+    @ViewBuilder
+    private var headerSection: some View {
+        VStack(spacing: 8) {
+            Text(result.playerWon ? "VICTORY" : (result.margin == 0 ? "TIE" : "DEFEAT"))
+                .font(.caption.bold())
+                .foregroundStyle(result.playerWon ? .green : (result.margin == 0 ? .orange : .red))
+                .tracking(3)
 
-    private var headerEmoji: String {
-        if scoringRatio >= 0.9 { return "star.fill" }
-        if scoringRatio >= 0.5 { return "hand.thumbsup.fill" }
-        return "lightbulb.fill"
+            Image(systemName: result.playerWon ? "trophy.fill" : (result.margin == 0 ? "equal.circle.fill" : "xmark.circle.fill"))
+                .font(.system(size: 44))
+                .foregroundStyle(result.playerWon ? .yellow : (result.margin == 0 ? .orange : .red.opacity(0.7)))
+                .accessibilityHidden(true)
+
+            Text(headerMessage)
+                .font(.title2.bold())
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+        }
     }
 
     private var headerMessage: String {
-        if scoringRatio >= 0.9 { return "Outstanding Run!" }
-        if scoringRatio >= 0.5 { return "Solid Performance!" }
-        return "Room to Improve!"
+        if result.playerWon && result.margin > 15 {
+            return "Dominant Win!"
+        } else if result.playerWon {
+            return "Close Victory!"
+        } else if result.margin == 0 {
+            return "Dead Even!"
+        } else if result.margin < 10 {
+            return "So Close!"
+        } else {
+            return "Tough Match"
+        }
     }
 
-    // MARK: - Score Card
+    // MARK: - Score Comparison
 
     @ViewBuilder
-    private var scoreCard: some View {
-        VStack(spacing: 16) {
-            // Big score
-            Text("\(result.totalPoints)")
-                .font(.system(size: 64, weight: .black, design: .rounded))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [.orange, .yellow],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .scaleEffect(animateScore ? 1.0 : 0.5)
-                .opacity(animateScore ? 1.0 : 0)
-
-            Text("TOTAL POINTS")
-                .font(.caption.bold())
-                .foregroundStyle(.white.opacity(0.5))
-                .tracking(1.5)
-
-            // Stats row
-            HStack(spacing: 24) {
-                resultStat(
-                    icon: "target",
-                    value: "\(result.nodesScored)/\(result.totalNodes)",
-                    label: "Nodes"
-                )
-                resultStat(
-                    icon: "clock.fill",
-                    value: String(format: "%.0fs", result.timeUsed),
-                    label: "Time Used"
-                )
-                resultStat(
-                    icon: result.didStall ? "exclamationmark.triangle.fill" : "checkmark.circle.fill",
-                    value: result.didStall ? "Yes" : "No",
-                    label: "Stalled"
-                )
+    private var scoreComparison: some View {
+        HStack(spacing: 16) {
+            // Red
+            VStack(spacing: 6) {
+                Text("RED ALLIANCE")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.red.opacity(0.7))
+                    .tracking(1)
+                Text("\(result.redScore)")
+                    .font(.system(size: 48, weight: .black, design: .rounded))
+                    .foregroundStyle(.red)
+                    .scaleEffect(animateScore ? 1 : 0.5)
+                    .opacity(animateScore ? 1 : 0)
+                Text("YOUR TEAM")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.3))
             }
+            .frame(maxWidth: .infinity)
+
+            Text("vs")
+                .font(.caption.bold())
+                .foregroundStyle(.white.opacity(0.3))
+
+            // Blue
+            VStack(spacing: 6) {
+                Text("BLUE ALLIANCE")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Color(red: 0.3, green: 0.5, blue: 1.0).opacity(0.7))
+                    .tracking(1)
+                Text("\(result.blueScore)")
+                    .font(.system(size: 48, weight: .black, design: .rounded))
+                    .foregroundStyle(Color(red: 0.3, green: 0.5, blue: 1.0))
+                    .scaleEffect(animateScore ? 1 : 0.5)
+                    .opacity(animateScore ? 1 : 0)
+                Text("OPPONENTS")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+            .frame(maxWidth: .infinity)
         }
         .padding(20)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(Color.white.opacity(0.06))
+                .fill(Color.white.opacity(0.05))
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
-                        .strokeBorder(Color.orange.opacity(0.2), lineWidth: 1)
+                        .strokeBorder(Color.orange.opacity(0.15), lineWidth: 1)
                 )
         )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Score: \(result.totalPoints) points. \(result.nodesScored) of \(result.totalNodes) nodes scored. \(result.didStall ? "Robot stalled during match." : "No stalls.")")
+        .accessibilityLabel("Final score: Red \(result.redScore), Blue \(result.blueScore). \(result.playerWon ? "You won!" : "Opponents won.")")
     }
 
-    @ViewBuilder
-    private func resultStat(icon: String, value: String, label: String) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.5))
-                .accessibilityHidden(true)
-            Text(value)
-                .font(.subheadline.bold())
-                .foregroundStyle(.white)
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.4))
-        }
-    }
-
-    // MARK: - Details Card
+    // MARK: - Breakdown
 
     @ViewBuilder
-    private var detailsCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("YOUR CHOICES")
+    private var breakdownSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("SCORE BREAKDOWN")
                 .font(.caption.bold())
                 .foregroundStyle(.white.opacity(0.4))
                 .tracking(1)
 
-            HStack(spacing: 12) {
-                choiceChip(
-                    icon: result.archetype.icon,
-                    label: result.archetype.rawValue,
-                    color: result.archetype.color
-                )
-                choiceChip(
-                    icon: result.autoPlan.icon,
-                    label: result.autoPlan.rawValue,
-                    color: result.autoPlan.color
-                )
+            HStack(spacing: 0) {
+                breakdownColumn(title: "RED", breakdown: result.redBreakdown, color: .red)
+                Divider().background(Color.white.opacity(0.1)).frame(height: 80)
+                breakdownColumn(title: "BLUE", breakdown: result.blueBreakdown,
+                                color: Color(red: 0.3, green: 0.5, blue: 1.0))
             }
 
-            // Max possible points
-            HStack {
-                Text("Max possible:")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.4))
-                Text("\(result.autoPlan.pointsPossible) pts")
-                    .font(.caption.bold())
-                    .foregroundStyle(.white.opacity(0.6))
-                Spacer()
-                Text("Achieved:")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.4))
-                Text("\(Int(scoringRatio * 100))%")
-                    .font(.caption.bold())
-                    .foregroundStyle(scoringRatio >= 0.8 ? .green : (scoringRatio >= 0.5 ? .yellow : .red))
+            // Player robot stats
+            HStack(spacing: 20) {
+                playerStat(icon: "target", value: "\(result.playerRobotScored)", label: "Your Scores")
+                playerStat(icon: "arrow.triangle.2.circlepath", value: "\(result.playerRobotCycled)", label: "Cycles")
+                playerStat(icon: result.didPlayerStall ? "exclamationmark.triangle.fill" : "checkmark.circle.fill",
+                           value: result.didPlayerStall ? "Yes" : "No", label: "Stalled")
+                if !result.calloutsUsed.isEmpty {
+                    playerStat(icon: "megaphone.fill", value: "\(result.calloutsUsed.count)", label: "Callouts")
+                }
             }
+            .padding(.top, 4)
         }
         .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 14)
                 .fill(Color.white.opacity(0.04))
         )
     }
 
     @ViewBuilder
-    private func choiceChip(icon: String, label: String, color: Color) -> some View {
-        HStack(spacing: 6) {
+    private func breakdownColumn(title: String, breakdown: ScoreBreakdown, color: Color) -> some View {
+        VStack(spacing: 6) {
+            Text(title).font(.system(size: 9, weight: .bold)).foregroundStyle(color.opacity(0.7))
+            HStack(spacing: 12) {
+                miniStat("Auto", "\(breakdown.autoPoints)", color)
+                miniStat("Teleop", "\(breakdown.teleopPoints)", color)
+                miniStat("Endgame", "\(breakdown.endgamePoints)", color)
+            }
+            Text("\(breakdown.totalPieces) pieces scored")
+                .font(.system(size: 9))
+                .foregroundStyle(.white.opacity(0.3))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func miniStat(_ label: String, _ value: String, _ color: Color) -> some View {
+        VStack(spacing: 1) {
+            Text(value).font(.caption.bold()).foregroundStyle(color)
+            Text(label).font(.system(size: 8)).foregroundStyle(.white.opacity(0.35))
+        }
+    }
+
+    @ViewBuilder
+    private func playerStat(icon: String, value: String, label: String) -> some View {
+        VStack(spacing: 3) {
             Image(systemName: icon)
-                .font(.caption)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.4))
+                .accessibilityHidden(true)
+            Text(value)
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+            Text(label)
+                .font(.system(size: 8))
+                .foregroundStyle(.white.opacity(0.35))
+        }
+    }
+
+    // MARK: - Choices
+
+    @ViewBuilder
+    private var choicesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("YOUR CHOICES")
+                .font(.caption.bold())
+                .foregroundStyle(.white.opacity(0.4))
+                .tracking(1)
+            HStack(spacing: 10) {
+                choiceChip(icon: result.playerStrategy.icon, label: result.playerStrategy.rawValue,
+                           color: result.playerStrategy.color)
+                choiceChip(icon: result.playerRole.icon, label: result.playerRole.rawValue,
+                           color: .cyan)
+                choiceChip(icon: result.playerAuto.icon, label: "\(result.playerAuto.rawValue) Auto",
+                           color: result.playerAuto.color)
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.03))
+        )
+    }
+
+    @ViewBuilder
+    private func choiceChip(icon: String, label: String, color: Color) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.caption2)
                 .foregroundStyle(color)
             Text(label)
                 .font(.caption.bold())
                 .foregroundStyle(.white.opacity(0.8))
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            Capsule()
-                .fill(color.opacity(0.12))
-        )
+        .padding(.vertical, 5)
+        .background(Capsule().fill(color.opacity(0.12)))
     }
 
     // MARK: - Coaching Card
@@ -255,30 +296,24 @@ struct ResultsView: View {
             HStack(spacing: 8) {
                 Image(systemName: coach.isAIAvailable ? "brain.head.profile.fill" : "person.fill")
                     .foregroundStyle(.orange)
-                Text(coach.isAIAvailable ? "AI Coach" : "Coach's Feedback")
+                Text(coach.isAIAvailable ? "AI Coach" : "Coach's Analysis")
                     .font(.subheadline.bold())
                     .foregroundStyle(.orange)
-
                 Spacer()
-
                 if coach.isAIAvailable {
                     Text("On-Device AI")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.white.opacity(0.4))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill(Color.white.opacity(0.08))
-                        )
+                        .background(Capsule().fill(Color.white.opacity(0.08)))
                 }
             }
 
             if coach.isGenerating {
                 HStack(spacing: 8) {
-                    ProgressView()
-                        .tint(.orange)
-                    Text("Analyzing your run...")
+                    ProgressView().tint(.orange)
+                    Text("Analyzing your match...")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.5))
                 }

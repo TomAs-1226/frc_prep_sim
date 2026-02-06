@@ -2,85 +2,57 @@ import SwiftUI
 
 // MARK: - Content View
 
-/// Main coordinator view that manages the linear game flow:
-/// Welcome → Build Choice → Auto Choice → Simulation → Results
+/// Main coordinator: Intro → PreMatch → Simulation → Results
 struct ContentView: View {
-    @State private var phase: GamePhase = .welcome
-    @State private var selectedArchetype: RobotArchetype?
-    @State private var selectedAutoPlan: AutoPlanType?
-    @State private var simulationResult: SimulationResult?
+    @State private var phase: GamePhase = .intro
+    @State private var strategy: AllianceStrategy?
+    @State private var role: RobotRole?
+    @State private var autoPlan: AutoPlan?
+    @State private var matchResult: MatchResult?
     @State private var showSettings = false
 
     var body: some View {
         ZStack {
-            // Phase-specific content
             Group {
                 switch phase {
-                case .welcome:
-                    WelcomeView(onStart: {
-                        withAnimation(.easeInOut(duration: 0.4)) {
-                            phase = .buildChoice
-                        }
+                case .intro:
+                    IntroView(onStart: {
+                        withAnimation(.easeInOut(duration: 0.4)) { phase = .preMatch }
                     })
                     .transition(.opacity)
 
-                case .buildChoice:
-                    BuildChoiceView(onSelect: { archetype in
-                        selectedArchetype = archetype
-                        withAnimation(.easeInOut(duration: 0.4)) {
-                            phase = .autoChoice
-                        }
-                    })
+                case .preMatch:
+                    PreMatchView { strat, r, auto in
+                        strategy = strat; role = r; autoPlan = auto
+                        withAnimation(.easeInOut(duration: 0.4)) { phase = .simulation }
+                    }
                     .transition(.asymmetric(
                         insertion: .move(edge: .trailing).combined(with: .opacity),
                         removal: .move(edge: .leading).combined(with: .opacity)
                     ))
 
-                case .autoChoice:
-                    if let archetype = selectedArchetype {
-                        AutoChoiceView(archetype: archetype, onSelect: { plan in
-                            selectedAutoPlan = plan
-                            withAnimation(.easeInOut(duration: 0.4)) {
-                                phase = .simulation
-                            }
-                        })
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .trailing).combined(with: .opacity),
-                            removal: .move(edge: .leading).combined(with: .opacity)
-                        ))
-                    }
-
                 case .simulation:
-                    if let archetype = selectedArchetype,
-                       let autoPlan = selectedAutoPlan {
-                        SimulationView(
-                            archetype: archetype,
-                            autoPlanType: autoPlan,
-                            onFinished: { result in
-                                simulationResult = result
-                                withAnimation(.easeInOut(duration: 0.5)) {
-                                    phase = .results
-                                }
-                            }
-                        )
+                    if let strat = strategy, let r = role, let auto = autoPlan {
+                        MatchView(strategy: strat, playerRole: r, autoPlan: auto) { result in
+                            matchResult = result
+                            withAnimation(.easeInOut(duration: 0.5)) { phase = .results }
+                        }
                         .transition(.opacity)
                     }
 
                 case .results:
-                    if let result = simulationResult {
-                        ResultsView(result: result, onTryAgain: {
-                            resetGame()
-                        })
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .trailing).combined(with: .opacity),
-                            removal: .opacity
-                        ))
+                    if let result = matchResult {
+                        ResultsView(result: result, onTryAgain: { resetGame() })
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .trailing).combined(with: .opacity),
+                                removal: .opacity
+                            ))
                     }
                 }
             }
             .animation(.easeInOut(duration: 0.4), value: phase)
 
-            // Settings button (top-right, always visible except during sim)
+            // Settings button (hidden during match)
             if phase != .simulation {
                 VStack {
                     HStack {
@@ -93,37 +65,23 @@ struct ContentView: View {
                 .padding(.trailing, 12)
             }
         }
-        .sheet(isPresented: $showSettings) {
-            SettingsView()
-        }
+        .sheet(isPresented: $showSettings) { SettingsView() }
     }
 
-    // MARK: - Settings Button
-
-    @ViewBuilder
     private var settingsButton: some View {
         Button(action: { showSettings = true }) {
             Image(systemName: "gearshape.fill")
                 .font(.title3)
                 .foregroundStyle(.white.opacity(0.6))
                 .padding(10)
-                .background(
-                    Circle()
-                        .fill(Color.white.opacity(0.08))
-                )
+                .background(Circle().fill(Color.white.opacity(0.08)))
                 .modifier(GlassModifier(shape: Circle()))
         }
         .accessibilityLabel("Open settings")
     }
 
-    // MARK: - Reset
-
     private func resetGame() {
-        selectedArchetype = nil
-        selectedAutoPlan = nil
-        simulationResult = nil
-        withAnimation(.easeInOut(duration: 0.4)) {
-            phase = .welcome
-        }
+        strategy = nil; role = nil; autoPlan = nil; matchResult = nil
+        withAnimation(.easeInOut(duration: 0.4)) { phase = .intro }
     }
 }
