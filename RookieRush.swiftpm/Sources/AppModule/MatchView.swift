@@ -7,6 +7,7 @@ import SceneKit
 struct MatchView: View {
     let strategy: AllianceStrategy
     let playerRole: RobotRole
+    let playerBuild: RobotBuild
     let autoPlan: AutoPlan
     let onFinish: (MatchResult) -> Void
 
@@ -15,14 +16,17 @@ struct MatchView: View {
     @State private var scene: SCNScene?
     @State private var hasStarted = false
 
-    init(strategy: AllianceStrategy, playerRole: RobotRole, autoPlan: AutoPlan,
-         onFinish: @escaping (MatchResult) -> Void) {
+    init(strategy: AllianceStrategy, playerRole: RobotRole, playerBuild: RobotBuild,
+         autoPlan: AutoPlan, onFinish: @escaping (MatchResult) -> Void) {
         self.strategy = strategy
         self.playerRole = playerRole
+        self.playerBuild = playerBuild
         self.autoPlan = autoPlan
         self.onFinish = onFinish
 
-        let configs = RobotFactory.buildRobots(playerRole: playerRole, strategy: strategy)
+        let configs = RobotFactory.buildRobots(
+            playerRole: playerRole, strategy: strategy, playerBuild: playerBuild
+        )
         _engine = StateObject(wrappedValue: MatchEngine(
             configs: configs, strategy: strategy, playerAuto: autoPlan
         ))
@@ -38,12 +42,59 @@ struct MatchView: View {
             })
             .ignoresSafeArea()
 
+            // Slow-mo dim overlay
+            if engine.isSlowMo {
+                Color.black.opacity(0.25)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+
+                // Vignette border
+                RoundedRectangle(cornerRadius: 0)
+                    .strokeBorder(
+                        RadialGradient(
+                            colors: [.clear, Color.orange.opacity(0.25)],
+                            center: .center,
+                            startRadius: 200, endRadius: 500
+                        ),
+                        lineWidth: 80
+                    )
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+
             // UI Overlays
             VStack(spacing: 0) {
                 // Top scoreboard
                 scoreboardBar
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
+
+                // Speed indicator
+                if engine.isSlowMo {
+                    HStack(spacing: 6) {
+                        Image(systemName: "tortoise.fill")
+                            .font(.caption2)
+                        Text("0.5× SLOW-MO")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.orange.opacity(0.15)))
+                    .transition(.scale.combined(with: .opacity))
+                    .padding(.top, 6)
+                } else {
+                    HStack(spacing: 4) {
+                        Image(systemName: "hare.fill")
+                            .font(.system(size: 8))
+                        Text("2× SPEED")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundStyle(.white.opacity(0.3))
+                    .padding(.top, 4)
+                }
 
                 Spacer()
 
@@ -53,11 +104,18 @@ struct MatchView: View {
                     .padding(.bottom, 8)
                     .animation(.easeInOut(duration: 0.3), value: engine.isSlowMo)
 
+                // Footer text
+                Text("Demo Level 1 — future levels will be more in-depth")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.2))
+                    .padding(.bottom, 4)
+
                 // Bottom controls
                 controlBar
                     .padding(.horizontal, 12)
                     .padding(.bottom, 12)
             }
+            .animation(.easeInOut(duration: 0.3), value: engine.isSlowMo)
 
             // "Match Over" overlay
             if engine.isFinished {
@@ -228,7 +286,6 @@ struct MatchView: View {
 
 // MARK: - SceneKit Representable
 
-/// UIViewRepresentable wrapping SceneKit for the match simulation.
 struct MatchSceneView: UIViewRepresentable {
     let engine: MatchEngine
     let onSceneReady: (SCNScene) -> Void
@@ -237,7 +294,7 @@ struct MatchSceneView: UIViewRepresentable {
         let view = SCNView()
         view.backgroundColor = .black
         view.antialiasingMode = .multisampling4X
-        view.allowsCameraControl = false
+        view.allowsCameraControl = true  // Drag to orbit, pinch to zoom
 
         let (scene, reefNodes) = FieldBuilder.buildScene()
         let robotNodes = RobotBuilder.addRobots(to: scene, configs: engine.configs)

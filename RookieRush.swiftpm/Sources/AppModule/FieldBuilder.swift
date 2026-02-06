@@ -1,282 +1,821 @@
 import SceneKit
 
 // MARK: - Field Builder
+// Constructs an accurate REEFSCAPE field from FieldSpec coordinates.
+// All geometry is procedural — no imported assets.
+// Coherent minimalist art style: dark surface, clean shapes, alliance colors.
 
-/// Constructs a full REEFSCAPE-inspired field with zones, scoring targets, and landmarks.
-/// All geometry is procedural — no imported assets.
 enum FieldBuilder {
+
+    // MARK: - Shared Materials (reuse for performance)
+
+    private static let floorMat: SCNMaterial = {
+        let m = SCNMaterial()
+        m.diffuse.contents = UIColor(red: 0.15, green: 0.16, blue: 0.18, alpha: 1)
+        m.roughness.contents = 0.8
+        return m
+    }()
+
+    private static let wallMat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(white: 0.55, alpha: 1); return m
+    }()
+
+    private static let redAllianceMat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(red: 0.75, green: 0.15, blue: 0.15, alpha: 0.9); return m
+    }()
+
+    private static let blueAllianceMat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(red: 0.15, green: 0.2, blue: 0.75, alpha: 0.9); return m
+    }()
+
+    private static let reefWallMat: SCNMaterial = {
+        let m = SCNMaterial()
+        m.diffuse.contents = UIColor(red: 0.12, green: 0.35, blue: 0.30, alpha: 0.85)
+        return m
+    }()
+
+    private static let pipeMat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(white: 0.60, alpha: 1); return m
+    }()
+
+    private static let bargeMat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(white: 0.40, alpha: 1); return m
+    }()
+
+    private static let tagMat: SCNMaterial = {
+        let m = SCNMaterial(); m.diffuse.contents = UIColor(white: 0.95, alpha: 1); return m
+    }()
+
+    // MARK: - Build Scene
 
     static func buildScene() -> (scene: SCNScene, reefNodes: [SCNNode]) {
         let scene = SCNScene()
-        scene.background.contents = UIColor(red: 0.06, green: 0.06, blue: 0.1, alpha: 1.0)
+        scene.background.contents = UIColor(red: 0.04, green: 0.04, blue: 0.08, alpha: 1)
 
+        let root = scene.rootNode
         addCamera(to: scene)
         addLighting(to: scene)
-        let root = scene.rootNode
 
         // Floor
-        let floor = SCNBox(width: CGFloat(FieldLayout.fieldWidth) + 0.4, height: 0.05,
-                           length: CGFloat(FieldLayout.fieldLength) + 0.4, chamferRadius: 0)
-        let floorMat = SCNMaterial()
-        floorMat.diffuse.contents = UIColor(red: 0.2, green: 0.2, blue: 0.22, alpha: 1.0)
+        let floor = SCNBox(width: CGFloat(FieldSpec.fieldLength + 0.4), height: 0.04,
+                           length: CGFloat(FieldSpec.fieldWidth + 0.4), chamferRadius: 0)
         floor.materials = [floorMat]
         let floorNode = SCNNode(geometry: floor)
-        floorNode.position = SCNVector3(0, -0.025, 0)
+        floorNode.position = SCNVector3(0, -0.02, 0)
         root.addChildNode(floorNode)
 
-        addFieldBorders(to: root)
+        // Field lines and carpet coloring
+        addFieldLines(to: root)
 
-        // Alliance source zones
-        addZone(to: root, pos: SCNVector3(3.0, 0.01, 0), size: (1.6, 3.8),
-                color: UIColor(red: 0.7, green: 0.15, blue: 0.15, alpha: 0.3), label: "RED SOURCE")
-        addZone(to: root, pos: SCNVector3(-3.0, 0.01, 0), size: (1.6, 3.8),
-                color: UIColor(red: 0.15, green: 0.2, blue: 0.7, alpha: 0.3), label: "BLUE SOURCE")
+        // Perimeter walls
+        addPerimeterWalls(to: root)
 
-        // Reef cluster
-        addZone(to: root, pos: SCNVector3(0, 0.008, 0), size: (2.0, 1.8),
-                color: UIColor(red: 0.1, green: 0.4, blue: 0.3, alpha: 0.25), label: "REEF ZONE")
+        // Alliance walls
+        addAllianceWalls(to: root)
 
+        // Reef structures (hexagonal)
         var reefNodes: [SCNNode] = []
-        for (i, p) in FieldLayout.reefNodes.enumerated() {
-            let n = makeReefNode(index: i)
-            n.position = SCNVector3(p.x, 0.2, p.y)
-            root.addChildNode(n)
-            reefNodes.append(n)
-            let ring = SCNTorus(ringRadius: 0.2, pipeRadius: 0.015)
-            let rm = SCNMaterial(); rm.diffuse.contents = UIColor.white.withAlphaComponent(0.35)
-            ring.materials = [rm]
-            let rn = SCNNode(geometry: ring); rn.position = SCNVector3(p.x, 0.015, p.y)
-            root.addChildNode(rn)
-        }
+        reefNodes += buildReef(center: FieldSpec.redReefCenter, alliance: .red, to: root)
+        reefNodes += buildReef(center: FieldSpec.blueReefCenter, alliance: .blue, to: root)
+
+        // Barge (center truss)
+        buildBarge(to: root)
+
+        // Coral stations (4 corners)
+        buildCoralStation(pos: FieldSpec.redCoralNear, alliance: .red, side: "near", to: root)
+        buildCoralStation(pos: FieldSpec.redCoralFar, alliance: .red, side: "far", to: root)
+        buildCoralStation(pos: FieldSpec.blueCoralNear, alliance: .blue, side: "near", to: root)
+        buildCoralStation(pos: FieldSpec.blueCoralFar, alliance: .blue, side: "far", to: root)
 
         // Processors
-        addProcessor(to: root, pos: FieldLayout.redProcessor, color: .red, label: "RED PROC")
-        addProcessor(to: root, pos: FieldLayout.blueProcessor, color: .blue, label: "BLUE PROC")
+        buildProcessor(pos: FieldSpec.redProcessor, alliance: .red, onFarWall: true, to: root)
+        buildProcessor(pos: FieldSpec.blueProcessor, alliance: .blue, onFarWall: false, to: root)
 
-        // Barge endgame zones
-        addBarge(to: root, pos: FieldLayout.redBarge, color: UIColor(red: 0.7, green: 0.2, blue: 0.2, alpha: 0.4))
-        addBarge(to: root, pos: FieldLayout.blueBarge, color: UIColor(red: 0.2, green: 0.2, blue: 0.7, alpha: 0.4))
-        addText("BARGE", at: SCNVector3(0, 0.03, 2.0), color: .white, size: 0.12, to: root)
+        // AprilTags
+        addAprilTags(to: root)
 
-        // Mid-field dividers
-        for x: Float in [-2.0, 2.0] {
-            let d = SCNBox(width: 0.015, height: 0.01, length: CGFloat(FieldLayout.fieldLength) - 0.2, chamferRadius: 0)
-            let m = SCNMaterial(); m.diffuse.contents = UIColor.white.withAlphaComponent(0.12); d.materials = [m]
-            let n = SCNNode(geometry: d); n.position = SCNVector3(x, 0.025, 0); root.addChildNode(n)
-        }
+        // Starting lines
+        addStartingLines(to: root)
 
-        // Barriers near reef
-        for (bx, bz, bw, bl) in [(-1.2, 0.0, 0.06, 1.0), (1.2, 0.0, 0.06, 1.0),
-                                   (0.0, -1.0, 1.5, 0.06), (0.0, 1.0, 1.5, 0.06)] as [(Float,Float,Float,Float)] {
-            let w = SCNBox(width: CGFloat(bw), height: 0.15, length: CGFloat(bl), chamferRadius: 0.01)
-            let wm = SCNMaterial(); wm.diffuse.contents = UIColor(white: 0.45, alpha: 0.6); w.materials = [wm]
-            let wn = SCNNode(geometry: w); wn.position = SCNVector3(bx, 0.075, bz); root.addChildNode(wn)
-        }
-
-        // Decorative game pieces
-        for off in [SIMD2<Float>(-0.2, -0.2), SIMD2<Float>(0.0, 0.1), SIMD2<Float>(0.2, -0.1)] {
-            addPiece(to: root, at: FieldLayout.redSource + off)
-            addPiece(to: root, at: FieldLayout.blueSource + off)
-        }
+        // Pre-staged game pieces (coral on marks + algae on reef)
+        addPreStagedPieces(to: root)
 
         return (scene, reefNodes)
     }
 
-    // MARK: - Helpers
+    // MARK: - Camera
 
     private static func addCamera(to scene: SCNScene) {
-        let c = SCNNode(); c.camera = SCNCamera()
-        c.camera?.fieldOfView = 48; c.camera?.zNear = 0.1; c.camera?.zFar = 60
-        c.position = SCNVector3(0, 7.0, 6.5); c.eulerAngles.x = -Float.pi / 3.0
-        scene.rootNode.addChildNode(c)
+        let cam = SCNCamera()
+        cam.fieldOfView = 50
+        cam.zNear = 0.05
+        cam.zFar = 80
+        let node = SCNNode()
+        node.camera = cam
+        node.position = SCNVector3(0, 7.5, 6.0)
+        node.eulerAngles.x = -.pi / 3
+        scene.rootNode.addChildNode(node)
     }
+
+    // MARK: - Lighting
 
     private static func addLighting(to scene: SCNScene) {
-        let a = SCNNode(); a.light = SCNLight(); a.light?.type = .ambient
-        a.light?.intensity = 600; a.light?.color = UIColor(white: 0.35, alpha: 1)
-        scene.rootNode.addChildNode(a)
-        let d = SCNNode(); d.light = SCNLight(); d.light?.type = .directional
-        d.light?.intensity = 800; d.light?.castsShadow = true; d.light?.shadowRadius = 4
-        d.position = SCNVector3(2, 10, 5); d.eulerAngles = SCNVector3(-Float.pi/3, Float.pi/8, 0)
-        scene.rootNode.addChildNode(d)
+        // Ambient
+        let amb = SCNNode(); amb.light = SCNLight()
+        amb.light?.type = .ambient; amb.light?.intensity = 500
+        amb.light?.color = UIColor(white: 0.40, alpha: 1)
+        scene.rootNode.addChildNode(amb)
+
+        // Main directional
+        let dir = SCNNode(); dir.light = SCNLight()
+        dir.light?.type = .directional; dir.light?.intensity = 900
+        dir.light?.castsShadow = true; dir.light?.shadowRadius = 3
+        dir.light?.shadowMapSize = CGSize(width: 2048, height: 2048)
+        dir.position = SCNVector3(3, 12, 5)
+        dir.eulerAngles = SCNVector3(-.pi / 3, .pi / 8, 0)
+        scene.rootNode.addChildNode(dir)
+
+        // Fill light (softer, from opposite side)
+        let fill = SCNNode(); fill.light = SCNLight()
+        fill.light?.type = .directional; fill.light?.intensity = 300
+        fill.position = SCNVector3(-3, 8, -4)
+        fill.eulerAngles = SCNVector3(-.pi / 4, -.pi / 6, 0)
+        scene.rootNode.addChildNode(fill)
     }
 
-    private static func addFieldBorders(to root: SCNNode) {
-        let w = FieldLayout.fieldWidth, l = FieldLayout.fieldLength
-        let c = UIColor.white.withAlphaComponent(0.3)
-        for (ex,ez,ew,el) in [(0,-l/2,w,Float(0.03)),(0,l/2,w,Float(0.03)),
-                               (-w/2,0,Float(0.03),l),(w/2,0,Float(0.03),l)] as [(Float,Float,Float,Float)] {
-            let b = SCNBox(width: CGFloat(ew), height: 0.01, length: CGFloat(el), chamferRadius: 0)
-            let m = SCNMaterial(); m.diffuse.contents = c; b.materials = [m]
-            let n = SCNNode(geometry: b); n.position = SCNVector3(ex, 0.03, ez); root.addChildNode(n)
+    // MARK: - Field Lines
+
+    private static func addFieldLines(to root: SCNNode) {
+        let hL = FieldSpec.halfLength
+        let hW = FieldSpec.halfWidth
+
+        // Center line
+        addLine(from: SIMD2(0, -hW), to: SIMD2(0, hW), color: .white, alpha: 0.15, to: root)
+
+        // Alliance area boundaries (light tape lines)
+        for sign: Float in [-1, 1] {
+            let x = sign * (hL - 1.0) // approximately 1 scene unit from wall
+            addLine(from: SIMD2(x, -hW), to: SIMD2(x, hW), color: .white, alpha: 0.08, to: root)
         }
     }
 
-    private static func addZone(to root: SCNNode, pos: SCNVector3, size: (Float,Float), color: UIColor, label: String) {
-        let z = SCNBox(width: CGFloat(size.0), height: 0.015, length: CGFloat(size.1), chamferRadius: 0)
-        let m = SCNMaterial(); m.diffuse.contents = color; z.materials = [m]
-        let n = SCNNode(geometry: z); n.position = pos; root.addChildNode(n)
-        addText(label, at: SCNVector3(pos.x, 0.025, pos.z + size.1/2 - 0.15),
-                color: UIColor.white.withAlphaComponent(0.5), size: 0.1, to: root)
+    private static func addLine(from a: SIMD2<Float>, to b: SIMD2<Float>,
+                                 color: UIColor, alpha: Float, to root: SCNNode) {
+        let dx = b.x - a.x, dz = b.y - a.y
+        let len = sqrt(dx * dx + dz * dz)
+        let line = SCNBox(width: CGFloat(len), height: 0.005, length: 0.015, chamferRadius: 0)
+        let m = SCNMaterial(); m.diffuse.contents = color.withAlphaComponent(CGFloat(alpha))
+        line.materials = [m]
+        let node = SCNNode(geometry: line)
+        node.position = SCNVector3((a.x + b.x) / 2, 0.003, (a.y + b.y) / 2)
+        node.eulerAngles.y = atan2(dx, dz)
+        root.addChildNode(node)
     }
 
-    private static func makeReefNode(index: Int) -> SCNNode {
-        let g = SCNCylinder(radius: 0.14, height: 0.4)
-        let m = SCNMaterial()
-        m.diffuse.contents = UIColor(hue: CGFloat(index)/6*0.3+0.1, saturation: 0.65, brightness: 0.85, alpha: 1)
-        m.emission.contents = UIColor.black; g.materials = [m]
-        let n = SCNNode(geometry: g); n.name = "reef_\(index)"; return n
+    // MARK: - Perimeter Walls
+
+    private static func addPerimeterWalls(to root: SCNNode) {
+        let hL = FieldSpec.halfLength, hW = FieldSpec.halfWidth
+        let wH = FieldSpec.perimeterWallHeight, wT = FieldSpec.wallThickness
+
+        // Long walls (along X axis, at ±Z)
+        for zSign: Float in [-1, 1] {
+            let wall = SCNBox(width: CGFloat(hL * 2), height: CGFloat(wH), length: CGFloat(wT), chamferRadius: 0)
+            wall.materials = [wallMat]
+            let n = SCNNode(geometry: wall)
+            n.position = SCNVector3(0, wH / 2, zSign * hW)
+            root.addChildNode(n)
+        }
     }
 
-    private static func addProcessor(to root: SCNNode, pos: SIMD2<Float>, color: UIColor, label: String) {
-        let b = SCNBox(width: 0.5, height: 0.02, length: 0.5, chamferRadius: 0)
-        let bm = SCNMaterial(); bm.diffuse.contents = color.withAlphaComponent(0.5); b.materials = [bm]
-        let bn = SCNNode(geometry: b); bn.position = SCNVector3(pos.x, 0.01, pos.y); root.addChildNode(bn)
-        for dx: Float in [-0.2, 0.2] { for dz: Float in [-0.2, 0.2] {
-            let p = SCNCylinder(radius: 0.02, height: 0.3)
-            let pm = SCNMaterial(); pm.diffuse.contents = color.withAlphaComponent(0.7); p.materials = [pm]
-            let pn = SCNNode(geometry: p); pn.position = SCNVector3(pos.x+dx, 0.15, pos.y+dz); root.addChildNode(pn)
-        }}
-        addText(label, at: SCNVector3(pos.x, 0.03, pos.y+0.35), color: .white, size: 0.07, to: root)
+    // MARK: - Alliance Walls
+
+    private static func addAllianceWalls(to root: SCNNode) {
+        let hL = FieldSpec.halfLength, hW = FieldSpec.halfWidth
+        let aH = FieldSpec.allianceWallHeight, wT = FieldSpec.wallThickness
+
+        // Red wall (+X end)
+        let rWall = SCNBox(width: CGFloat(wT), height: CGFloat(aH), length: CGFloat(hW * 2), chamferRadius: 0)
+        rWall.materials = [redAllianceMat]
+        let rn = SCNNode(geometry: rWall)
+        rn.position = SCNVector3(hL, aH / 2, 0)
+        root.addChildNode(rn)
+
+        // Blue wall (-X end)
+        let bWall = SCNBox(width: CGFloat(wT), height: CGFloat(aH), length: CGFloat(hW * 2), chamferRadius: 0)
+        bWall.materials = [blueAllianceMat]
+        let bn = SCNNode(geometry: bWall)
+        bn.position = SCNVector3(-hL, aH / 2, 0)
+        root.addChildNode(bn)
     }
 
-    private static func addBarge(to root: SCNNode, pos: SIMD2<Float>, color: UIColor) {
-        let p = SCNBox(width: 1.2, height: 0.08, length: 0.6, chamferRadius: 0.02)
-        let pm = SCNMaterial(); pm.diffuse.contents = color; p.materials = [pm]
-        let pn = SCNNode(geometry: p); pn.position = SCNVector3(pos.x, 0.04, pos.y); root.addChildNode(pn)
-        let r = SCNBox(width: 0.4, height: 0.04, length: 0.3, chamferRadius: 0)
-        let rm = SCNMaterial(); rm.diffuse.contents = color.withAlphaComponent(0.6); r.materials = [rm]
-        let rn = SCNNode(geometry: r); rn.position = SCNVector3(pos.x, 0.02, pos.y-0.4)
-        rn.eulerAngles.x = -0.15; root.addChildNode(rn)
+    // MARK: - Reef (Hexagonal Structure)
+
+    private static func buildReef(center: SIMD2<Float>, alliance: Alliance, to root: SCNNode) -> [SCNNode] {
+        var scoringNodes: [SCNNode] = []
+        let vertices = FieldSpec.reefVertices(center: center)
+        let faces = FieldSpec.reefFaces(center: center)
+        let pipeH = FieldSpec.reefPipeHeight
+
+        // Build hex walls (6 faces)
+        for i in 0..<6 {
+            let v1 = vertices[i]
+            let v2 = vertices[(i + 1) % 6]
+            let dx = v2.x - v1.x, dz = v2.y - v1.y
+            let edgeLen = sqrt(dx * dx + dz * dz)
+            let angle = atan2(dx, dz)
+
+            // Translucent wall panel
+            let wallGeo = SCNBox(width: CGFloat(edgeLen), height: CGFloat(pipeH * 0.15),
+                                  length: 0.01, chamferRadius: 0)
+            let wallColor = alliance == .red
+                ? UIColor(red: 0.5, green: 0.12, blue: 0.12, alpha: 0.35)
+                : UIColor(red: 0.12, green: 0.15, blue: 0.5, alpha: 0.35)
+            let wm = SCNMaterial(); wm.diffuse.contents = wallColor; wallGeo.materials = [wm]
+            let wallNode = SCNNode(geometry: wallGeo)
+            wallNode.position = SCNVector3((v1.x + v2.x) / 2, pipeH * 0.075, (v1.y + v2.y) / 2)
+            wallNode.eulerAngles.y = angle
+            root.addChildNode(wallNode)
+
+            // L1 trough at base of face
+            let troughGeo = SCNBox(width: CGFloat(edgeLen * 0.7), height: 0.025,
+                                    length: CGFloat(FieldSpec.troughDepth), chamferRadius: 0.005)
+            let tm = SCNMaterial()
+            tm.diffuse.contents = UIColor(red: 0.25, green: 0.60, blue: 0.45, alpha: 0.8)
+            troughGeo.materials = [tm]
+            let troughNode = SCNNode(geometry: troughGeo)
+            let face = faces[i]
+            let outward: Float = 0.03
+            troughNode.position = SCNVector3(
+                face.center.x + cos(face.angle) * outward,
+                FieldSpec.troughL1,
+                face.center.y + sin(face.angle) * outward
+            )
+            troughNode.eulerAngles.y = angle
+            troughNode.name = "reef_l1_\(i)"
+            root.addChildNode(troughNode)
+            scoringNodes.append(troughNode)
+        }
+
+        // Build scoring pipes (12 per reef, 2 per face)
+        let pipes = FieldSpec.reefPipes(center: center)
+        for (pIdx, pipe) in pipes.enumerated() {
+            let pipeGeo = SCNCylinder(radius: CGFloat(FieldSpec.reefPipeRadius), height: CGFloat(pipeH))
+            pipeGeo.materials = [pipeMat]
+            let pipeNode = SCNNode(geometry: pipeGeo)
+            pipeNode.position = SCNVector3(pipe.position.x, pipeH / 2, pipe.position.y)
+            root.addChildNode(pipeNode)
+
+            // Branches at L2, L3, L4
+            for (level, height) in [(2, FieldSpec.branchL2), (3, FieldSpec.branchL3), (4, FieldSpec.branchL4)] {
+                let brGeo = SCNCylinder(radius: CGFloat(FieldSpec.branchRadius),
+                                         height: CGFloat(FieldSpec.branchLength))
+                let brMat = SCNMaterial()
+                switch level {
+                case 2: brMat.diffuse.contents = UIColor(red: 0.3, green: 0.7, blue: 0.4, alpha: 1)
+                case 3: brMat.diffuse.contents = UIColor(red: 0.7, green: 0.6, blue: 0.2, alpha: 1)
+                default: brMat.diffuse.contents = UIColor(red: 0.8, green: 0.3, blue: 0.3, alpha: 1)
+                }
+                brGeo.materials = [brMat]
+                let brNode = SCNNode(geometry: brGeo)
+                // Branch extends outward from pipe
+                let outX = cos(pipe.faceAngle) * FieldSpec.branchLength / 2
+                let outZ = sin(pipe.faceAngle) * FieldSpec.branchLength / 2
+                brNode.position = SCNVector3(pipe.position.x + outX, height, pipe.position.y + outZ)
+                brNode.eulerAngles.z = -.pi / 2
+                brNode.eulerAngles.y = pipe.faceAngle
+                brNode.name = "reef_l\(level)_\(pIdx)"
+                root.addChildNode(brNode)
+                scoringNodes.append(brNode)
+            }
+        }
+
+        // Reef zone indicator ring on floor
+        let zoneGeo = SCNTorus(ringRadius: CGFloat(FieldSpec.reefApothem + 0.15), pipeRadius: 0.008)
+        let zoneMat = SCNMaterial()
+        zoneMat.diffuse.contents = (alliance == .red)
+            ? UIColor.red.withAlphaComponent(0.2)
+            : UIColor.blue.withAlphaComponent(0.2)
+        zoneGeo.materials = [zoneMat]
+        let zoneNode = SCNNode(geometry: zoneGeo)
+        zoneNode.position = SCNVector3(center.x, 0.005, center.y)
+        root.addChildNode(zoneNode)
+
+        // Label
+        addText(alliance == .red ? "RED REEF" : "BLUE REEF",
+                at: SCNVector3(center.x, 0.02, center.y + FieldSpec.reefApothem + 0.25),
+                color: alliance == .red ? .red : UIColor(red: 0.3, green: 0.4, blue: 1.0, alpha: 1),
+                size: 0.06, to: root)
+
+        return scoringNodes
     }
 
-    private static func addPiece(to root: SCNNode, at pos: SIMD2<Float>) {
-        let s = SCNSphere(radius: 0.06)
-        let m = SCNMaterial(); m.diffuse.contents = UIColor.orange; s.materials = [m]
-        let n = SCNNode(geometry: s); n.position = SCNVector3(pos.x, 0.08, pos.y)
-        let u = SCNAction.moveBy(x: 0, y: 0.04, z: 0, duration: 0.7); u.timingMode = .easeInEaseOut
-        n.runAction(SCNAction.repeatForever(SCNAction.sequence([u, u.reversed()]))); root.addChildNode(n)
+    // MARK: - Barge (Center Truss Structure)
+
+    private static func buildBarge(to root: SCNNode) {
+        let span = FieldSpec.bargeTrussSpan
+        let depth = FieldSpec.bargeTrussDepth
+        let height = FieldSpec.bargeTrussHeight
+        let legW = FieldSpec.bargeLegWidth
+
+        // 4 legs (vertical posts at corners of barge)
+        for xSign: Float in [-1, 1] {
+            for zSign: Float in [-1, 1] {
+                let leg = SCNBox(width: CGFloat(legW), height: CGFloat(height), length: CGFloat(legW), chamferRadius: 0)
+                leg.materials = [bargeMat]
+                let n = SCNNode(geometry: leg)
+                n.position = SCNVector3(xSign * depth / 2, height / 2, zSign * (span / 2 - 0.1))
+                root.addChildNode(n)
+            }
+        }
+
+        // Top beam (horizontal, spans the width)
+        let beam = SCNBox(width: CGFloat(depth), height: CGFloat(legW), length: CGFloat(span), chamferRadius: 0)
+        beam.materials = [bargeMat]
+        let beamNode = SCNNode(geometry: beam)
+        beamNode.position = SCNVector3(0, height, 0)
+        root.addChildNode(beamNode)
+
+        // Cross braces
+        let brace = SCNBox(width: CGFloat(depth - legW), height: 0.015, length: 0.015, chamferRadius: 0)
+        brace.materials = [bargeMat]
+        for z: Float in stride(from: -span / 2 + 0.5, through: span / 2 - 0.5, by: 0.8) {
+            let bn = SCNNode(geometry: brace)
+            bn.position = SCNVector3(0, height * 0.7, z)
+            root.addChildNode(bn)
+        }
+
+        // Cages (simplified as small boxes hanging from truss)
+        let cageMat = SCNMaterial()
+        cageMat.diffuse.contents = UIColor(red: 0.6, green: 0.55, blue: 0.1, alpha: 0.8)
+        for i in 0..<3 {
+            let zOff = Float(i - 1) * 0.7
+            // One cage per alliance side (red = +X, blue = -X)
+            for xSign: Float in [-1, 1] {
+                let cage = SCNBox(width: CGFloat(FieldSpec.cageWidth), height: CGFloat(FieldSpec.cageHeight),
+                                   length: 0.08, chamferRadius: 0.005)
+                cage.materials = [cageMat]
+                let cn = SCNNode(geometry: cage)
+                let cageY = (i == 1) ? FieldSpec.shallowCageY : FieldSpec.deepCageY
+                cn.position = SCNVector3(xSign * 0.15, cageY + FieldSpec.cageHeight / 2, zOff)
+                root.addChildNode(cn)
+
+                // Chain (thin cylinder from cage to truss)
+                let chainLen = height - cageY - FieldSpec.cageHeight
+                if chainLen > 0 {
+                    let chain = SCNCylinder(radius: 0.004, height: CGFloat(chainLen))
+                    let chMat = SCNMaterial()
+                    chMat.diffuse.contents = UIColor(white: 0.5, alpha: 0.6)
+                    chain.materials = [chMat]
+                    let chNode = SCNNode(geometry: chain)
+                    chNode.position = SCNVector3(xSign * 0.15,
+                                                  cageY + FieldSpec.cageHeight + chainLen / 2, zOff)
+                    root.addChildNode(chNode)
+                }
+            }
+        }
+
+        // Net (simplified as translucent plane)
+        let netGeo = SCNBox(width: CGFloat(FieldSpec.netWidth), height: 0.005,
+                             length: CGFloat(FieldSpec.netLength), chamferRadius: 0)
+        let netMat = SCNMaterial()
+        netMat.diffuse.contents = UIColor(white: 0.8, alpha: 0.15)
+        netMat.isDoubleSided = true
+        netGeo.materials = [netMat]
+        let netNode = SCNNode(geometry: netGeo)
+        netNode.position = SCNVector3(0, FieldSpec.netHeight, 0)
+        root.addChildNode(netNode)
+
+        // Barge zone markings (floor tape)
+        for xSign: Float in [-1, 1] {
+            let zoneColor = xSign > 0
+                ? UIColor.red.withAlphaComponent(0.12)
+                : UIColor.blue.withAlphaComponent(0.12)
+            let zone = SCNBox(width: CGFloat(FieldSpec.bargeZoneDepth), height: 0.008,
+                               length: CGFloat(FieldSpec.bargeZoneHalfLength * 2), chamferRadius: 0)
+            let zm = SCNMaterial(); zm.diffuse.contents = zoneColor; zone.materials = [zm]
+            let zn = SCNNode(geometry: zone)
+            zn.position = SCNVector3(xSign * (depth / 2 + FieldSpec.bargeZoneDepth / 2), 0.004, 0)
+            root.addChildNode(zn)
+        }
+
+        addText("BARGE", at: SCNVector3(0, 0.02, span / 2 + 0.15),
+                color: UIColor.white.withAlphaComponent(0.4), size: 0.08, to: root)
     }
 
-    private static func addText(_ text: String, at pos: SCNVector3, color: UIColor, size: CGFloat, to root: SCNNode) {
-        let g = SCNText(string: text, extrusionDepth: 0.008)
-        g.font = UIFont.systemFont(ofSize: size, weight: .bold); g.flatness = 0.4
-        let m = SCNMaterial(); m.diffuse.contents = color.withAlphaComponent(0.6); g.materials = [m]
-        let n = SCNNode(geometry: g)
-        let (mn, mx) = n.boundingBox; n.pivot = SCNMatrix4MakeTranslation((mx.x-mn.x)/2+mn.x, 0, 0)
-        n.position = pos; n.eulerAngles.x = -Float.pi/2; root.addChildNode(n)
+    // MARK: - Coral Stations
+
+    private static func buildCoralStation(pos: SIMD2<Float>, alliance: Alliance,
+                                           side: String, to root: SCNNode) {
+        let color = alliance.uiColor.withAlphaComponent(0.25)
+        let w = FieldSpec.coralStationWidth
+        let d = FieldSpec.coralStationDepth
+
+        // Floor zone
+        let zone = SCNBox(width: CGFloat(w), height: 0.008, length: CGFloat(d), chamferRadius: 0)
+        let zm = SCNMaterial(); zm.diffuse.contents = color; zone.materials = [zm]
+        let zn = SCNNode(geometry: zone)
+        zn.position = SCNVector3(pos.x, 0.004, pos.y)
+        root.addChildNode(zn)
+
+        // Chute structure (angled box representing the coral feed)
+        let chute = SCNBox(width: CGFloat(w * 0.6), height: 0.04, length: 0.15, chamferRadius: 0.005)
+        let cm = SCNMaterial(); cm.diffuse.contents = alliance.uiColor.withAlphaComponent(0.6)
+        chute.materials = [cm]
+        let cn = SCNNode(geometry: chute)
+        let wallX = alliance == .red ? FieldSpec.halfLength : -FieldSpec.halfLength
+        cn.position = SCNVector3(wallX, 0.35, pos.y)
+        cn.eulerAngles.z = alliance == .red ? -0.45 : 0.45  // angled at ~26° (simplified 55° real)
+        root.addChildNode(cn)
+
+        // Decorative coral pieces near station
+        for i in 0..<2 {
+            let coral = makeCoral()
+            let offset: Float = Float(i) * 0.12 - 0.06
+            let approachX = alliance == .red ? pos.x - 0.3 : pos.x + 0.3
+            coral.position = SCNVector3(approachX, 0.04, pos.y + offset)
+            root.addChildNode(coral)
+        }
+    }
+
+    // MARK: - Processors
+
+    private static func buildProcessor(pos: SIMD2<Float>, alliance: Alliance,
+                                        onFarWall: Bool, to root: SCNNode) {
+        let w = FieldSpec.processorWidth
+        let d = FieldSpec.processorDepth
+
+        // Floor zone
+        let zone = SCNBox(width: CGFloat(w), height: 0.008, length: CGFloat(d), chamferRadius: 0)
+        let zm = SCNMaterial(); zm.diffuse.contents = alliance.uiColor.withAlphaComponent(0.20)
+        zone.materials = [zm]
+        let zn = SCNNode(geometry: zone)
+        zn.position = SCNVector3(pos.x, 0.004, pos.y)
+        root.addChildNode(zn)
+
+        // Processor structure (box against wall)
+        let proc = SCNBox(width: CGFloat(w * 0.8), height: 0.20, length: 0.12, chamferRadius: 0.01)
+        let pm = SCNMaterial(); pm.diffuse.contents = alliance.uiColor.withAlphaComponent(0.5)
+        proc.materials = [pm]
+        let pn = SCNNode(geometry: proc)
+        let wallZ = onFarWall ? FieldSpec.halfWidth : -FieldSpec.halfWidth
+        pn.position = SCNVector3(pos.x, 0.10, wallZ)
+        root.addChildNode(pn)
+
+        let label = alliance == .red ? "PROCESSOR" : "PROCESSOR"
+        addText(label, at: SCNVector3(pos.x, 0.015, pos.y + (onFarWall ? -0.15 : 0.15)),
+                color: alliance.uiColor.withAlphaComponent(0.5), size: 0.04, to: root)
+    }
+
+    // MARK: - AprilTags
+
+    private static func addAprilTags(to root: SCNNode) {
+        let size = FieldSpec.aprilTagSize
+
+        for tag in FieldSpec.aprilTags {
+            let tagNode = SCNNode()
+
+            // White border square
+            let border = SCNBox(width: CGFloat(size), height: CGFloat(size), length: 0.003, chamferRadius: 0)
+            border.materials = [tagMat]
+            let borderNode = SCNNode(geometry: border)
+            tagNode.addChildNode(borderNode)
+
+            // Inner black pattern (simplified as a smaller dark square)
+            let inner = SCNBox(width: CGFloat(size * 0.75), height: CGFloat(size * 0.75), length: 0.004, chamferRadius: 0)
+            let innerMat = SCNMaterial()
+            innerMat.diffuse.contents = UIColor(white: 0.1, alpha: 1)
+            inner.materials = [innerMat]
+            let innerNode = SCNNode(geometry: inner)
+            innerNode.position.z = 0.001
+            tagNode.addChildNode(innerNode)
+
+            // ID number
+            let idText = SCNText(string: "\(tag.id)", extrusionDepth: 0.002)
+            idText.font = UIFont.monospacedDigitSystemFont(ofSize: CGFloat(size * 0.25), weight: .bold)
+            idText.flatness = 0.5
+            let idMat = SCNMaterial(); idMat.diffuse.contents = UIColor.white
+            idText.materials = [idMat]
+            let idNode = SCNNode(geometry: idText)
+            let (mn, mx) = idNode.boundingBox
+            idNode.pivot = SCNMatrix4MakeTranslation((mx.x - mn.x) / 2 + mn.x, (mx.y - mn.y) / 2 + mn.y, 0)
+            idNode.position = SCNVector3(0, 0, 0.003)
+            tagNode.addChildNode(idNode)
+
+            tagNode.position = SCNVector3(tag.position.x, tag.position.y, tag.position.z)
+            tagNode.eulerAngles.y = tag.yaw
+            tagNode.name = "apriltag_\(tag.id)"
+            root.addChildNode(tagNode)
+        }
+    }
+
+    // MARK: - Starting Lines
+
+    private static func addStartingLines(to root: SCNNode) {
+        let hW = FieldSpec.halfWidth
+        // Red starting line
+        let redX = FieldSpec.redAutoLine
+        addLine(from: SIMD2(redX, -hW + 0.1), to: SIMD2(redX, hW - 0.1),
+                color: .red, alpha: 0.35, to: root)
+        // Blue starting line
+        let blueX = FieldSpec.blueAutoLine
+        addLine(from: SIMD2(blueX, -hW + 0.1), to: SIMD2(blueX, hW - 0.1),
+                color: UIColor(red: 0.3, green: 0.4, blue: 1, alpha: 1), alpha: 0.35, to: root)
+    }
+
+    // MARK: - Pre-Staged Game Pieces
+
+    private static func addPreStagedPieces(to root: SCNNode) {
+        // 6 coral on marks near each reef
+        for center in [FieldSpec.redReefCenter, FieldSpec.blueReefCenter] {
+            let faces = FieldSpec.reefFaces(center: center)
+            for (i, face) in faces.enumerated() {
+                let dist = FieldSpec.reefApothem + 0.30
+                let cx = center.x + cos(face.angle) * dist
+                let cz = center.y + sin(face.angle) * dist
+                let coral = makeCoral()
+                coral.position = SCNVector3(cx, 0.035, cz)
+                coral.eulerAngles.x = .pi / 2
+                coral.name = "prestaged_coral_\(i)"
+                root.addChildNode(coral)
+
+                // Algae ball on top of coral mark
+                if i < 3 { // only 3 algae per side staged this way
+                    let algae = makeAlgae()
+                    algae.position = SCNVector3(cx, 0.10, cz)
+                    root.addChildNode(algae)
+                }
+            }
+        }
+    }
+
+    // MARK: - Game Piece Geometry
+
+    static func makeCoral() -> SCNNode {
+        let geo = SCNCylinder(radius: CGFloat(FieldSpec.coralRadius), height: CGFloat(FieldSpec.coralLength))
+        let mat = SCNMaterial()
+        mat.diffuse.contents = UIColor(red: 0.95, green: 0.90, blue: 0.85, alpha: 1)
+        geo.materials = [mat]
+        return SCNNode(geometry: geo)
+    }
+
+    static func makeAlgae() -> SCNNode {
+        let geo = SCNSphere(radius: CGFloat(FieldSpec.algaeRadius))
+        let mat = SCNMaterial()
+        mat.diffuse.contents = UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.85)
+        geo.materials = [mat]
+        return SCNNode(geometry: geo)
+    }
+
+    // MARK: - Text Helper
+
+    private static func addText(_ text: String, at pos: SCNVector3, color: UIColor,
+                                 size: CGFloat, to root: SCNNode) {
+        let geo = SCNText(string: text, extrusionDepth: 0.005)
+        geo.font = UIFont.systemFont(ofSize: size, weight: .bold); geo.flatness = 0.4
+        let mat = SCNMaterial(); mat.diffuse.contents = color; geo.materials = [mat]
+        let node = SCNNode(geometry: geo)
+        let (mn, mx) = node.boundingBox
+        node.pivot = SCNMatrix4MakeTranslation((mx.x - mn.x) / 2 + mn.x, 0, 0)
+        node.position = pos; node.eulerAngles.x = -.pi / 2
+        root.addChildNode(node)
     }
 }
 
 // MARK: - Robot Builder
 
-/// Builds 6 visually distinct robots from primitive geometry.
 enum RobotBuilder {
 
     static func buildRobot(config: RobotConfig) -> SCNNode {
         let root = SCNNode()
         root.name = "robot_\(config.id)"
-        let color = config.alliance.uiColor
-        let cW: CGFloat = 0.28, cH: CGFloat = 0.1, cL: CGFloat = 0.32
+        let allianceColor = config.alliance.uiColor
 
-        // Chassis
-        let ch = SCNBox(width: cW, height: cH, length: cL, chamferRadius: 0.015)
-        let cm = SCNMaterial(); cm.diffuse.contents = UIColor(white: 0.25, alpha: 1); ch.materials = [cm]
-        let cn = SCNNode(geometry: ch); cn.position = SCNVector3(0, Float(cH/2), 0); root.addChildNode(cn)
+        // Chassis dimensions (FRC frame ~28in square → 0.355 scene)
+        let cW: CGFloat = 0.32, cH: CGFloat = 0.08, cL: CGFloat = 0.32
 
-        // Bumpers
-        let bm = SCNBox(width: cW+0.04, height: cH*0.45, length: cL+0.04, chamferRadius: 0.008)
-        let bmm = SCNMaterial(); bmm.diffuse.contents = color.withAlphaComponent(0.85); bm.materials = [bmm]
-        let bn = SCNNode(geometry: bm); bn.position = SCNVector3(0, Float(cH*0.25), 0); root.addChildNode(bn)
+        // Chassis base (dark metal)
+        let chassisGeo = SCNBox(width: cW, height: cH, length: cL, chamferRadius: 0.01)
+        let chassisMat = SCNMaterial()
+        chassisMat.diffuse.contents = UIColor(white: 0.22, alpha: 1)
+        chassisMat.metalness.contents = 0.4
+        chassisGeo.materials = [chassisMat]
+        let chassis = SCNNode(geometry: chassisGeo)
+        chassis.position = SCNVector3(0, Float(cH / 2), 0)
+        root.addChildNode(chassis)
 
-        // 4 swerve wheels
-        let wr: CGFloat = 0.04
-        for (ox, oz) in [(-cW/2, -cL/2+0.04), (cW/2, -cL/2+0.04),
-                          (-cW/2, cL/2-0.04), (cW/2, cL/2-0.04)] as [(CGFloat,CGFloat)] {
-            let w = SCNCylinder(radius: wr, height: 0.025)
-            let wm = SCNMaterial(); wm.diffuse.contents = UIColor.darkGray; w.materials = [wm]
-            let wn = SCNNode(geometry: w); wn.eulerAngles.z = .pi/2
-            wn.position = SCNVector3(Float(ox), Float(wr), Float(oz)); root.addChildNode(wn)
+        // Bumpers (alliance colored, slightly larger than chassis)
+        let bGeo = SCNBox(width: cW + 0.05, height: cH * 0.5, length: cL + 0.05, chamferRadius: 0.008)
+        let bMat = SCNMaterial()
+        bMat.diffuse.contents = allianceColor.withAlphaComponent(0.85)
+        bGeo.materials = [bMat]
+        let bumpers = SCNNode(geometry: bGeo)
+        bumpers.position = SCNVector3(0, Float(cH * 0.25), 0)
+        root.addChildNode(bumpers)
+
+        // Wheels (4 swerve modules or 6 tank wheels)
+        if config.build.drivetrain == .swerve {
+            addSwerveWheels(to: root, cW: cW, cL: cL)
+        } else {
+            addTankWheels(to: root, cW: cW, cL: cL)
         }
 
         // Superstructure
-        addSuper(to: root, type: config.superstructure, h: Float(cH))
+        let baseY = Float(cH)
+        switch config.superstructure {
+        case .elevator: addElevator(to: root, baseY: baseY, color: allianceColor)
+        case .arm:      addPivotArm(to: root, baseY: baseY, color: allianceColor)
+        case .intake:   addLowIntake(to: root, baseY: baseY, cL: Float(cL), color: allianceColor)
+        case .wedge:    addWedge(to: root, baseY: baseY, cW: Float(cW), cL: Float(cL), color: allianceColor)
+        }
 
-        // Team number
-        let lb = SCNText(string: config.teamNumber, extrusionDepth: 0.003)
-        lb.font = UIFont.monospacedDigitSystemFont(ofSize: 0.04, weight: .bold); lb.flatness = 0.5
-        let lm = SCNMaterial(); lm.diffuse.contents = UIColor.white; lb.materials = [lm]
-        let ln = SCNNode(geometry: lb)
-        let (mn, mx) = ln.boundingBox; ln.pivot = SCNMatrix4MakeTranslation((mx.x-mn.x)/2+mn.x, 0, 0)
-        ln.position = SCNVector3(0, Float(cH*0.6), Float(cL/2)+0.003); root.addChildNode(ln)
+        // Team number plate (front)
+        let label = SCNText(string: config.teamNumber, extrusionDepth: 0.002)
+        label.font = UIFont.monospacedDigitSystemFont(ofSize: 0.035, weight: .bold)
+        label.flatness = 0.5
+        let lMat = SCNMaterial(); lMat.diffuse.contents = UIColor.white
+        label.materials = [lMat]
+        let labelNode = SCNNode(geometry: label)
+        let (mn, mx) = labelNode.boundingBox
+        labelNode.pivot = SCNMatrix4MakeTranslation((mx.x - mn.x) / 2 + mn.x, 0, 0)
+        labelNode.position = SCNVector3(0, Float(cH * 0.6), Float(cL / 2) + 0.005)
+        root.addChildNode(labelNode)
 
         return root
     }
 
-    private static func addSuper(to root: SCNNode, type: SuperstructureType, h: Float) {
-        switch type {
-        case .elevator:
-            for dx: Float in [-0.06, 0.06] {
-                let r = SCNBox(width: 0.02, height: 0.35, length: 0.02, chamferRadius: 0)
-                let m = SCNMaterial(); m.diffuse.contents = UIColor.systemGray; r.materials = [m]
-                let n = SCNNode(geometry: r); n.position = SCNVector3(dx, h+0.175, 0); root.addChildNode(n)
-            }
-            let c = SCNBox(width: 0.1, height: 0.025, length: 0.05, chamferRadius: 0.005)
-            let cm = SCNMaterial(); cm.diffuse.contents = UIColor.systemYellow; c.materials = [cm]
-            let cn = SCNNode(geometry: c); cn.position = SCNVector3(0, h+0.35, 0); root.addChildNode(cn)
+    // MARK: - Drivetrain Visuals
 
-        case .arm:
-            let a = SCNCylinder(radius: 0.015, height: 0.22)
-            let am = SCNMaterial(); am.diffuse.contents = UIColor.systemOrange; a.materials = [am]
-            let an = SCNNode(geometry: a); an.position = SCNVector3(0, h+0.11, 0.04)
-            an.eulerAngles.x = 0.3; root.addChildNode(an)
-            let g = SCNBox(width: 0.08, height: 0.02, length: 0.04, chamferRadius: 0.005)
-            let gm = SCNMaterial(); gm.diffuse.contents = UIColor.systemYellow; g.materials = [gm]
-            let gn = SCNNode(geometry: g); gn.position = SCNVector3(0, h+0.22, 0.1); root.addChildNode(gn)
+    private static func addSwerveWheels(to root: SCNNode, cW: CGFloat, cL: CGFloat) {
+        let wheelR: CGFloat = 0.035
+        let wheelH: CGFloat = 0.025
+        let wMat = SCNMaterial(); wMat.diffuse.contents = UIColor.darkGray
 
-        case .intake:
-            let r = SCNCylinder(radius: 0.03, height: 0.2)
-            let rm = SCNMaterial(); rm.diffuse.contents = UIColor.systemTeal; r.materials = [rm]
-            let rn = SCNNode(geometry: r); rn.eulerAngles.z = .pi/2
-            rn.position = SCNVector3(0, h+0.03, 0.18); root.addChildNode(rn)
-            let p = SCNBox(width: 0.24, height: 0.03, length: 0.08, chamferRadius: 0)
-            let pm = SCNMaterial(); pm.diffuse.contents = UIColor.systemTeal.withAlphaComponent(0.5); p.materials = [pm]
-            let pn = SCNNode(geometry: p); pn.position = SCNVector3(0, h+0.06, 0.17); root.addChildNode(pn)
+        for (ox, oz) in [(-cW/2 + 0.03, -cL/2 + 0.04), (cW/2 - 0.03, -cL/2 + 0.04),
+                          (-cW/2 + 0.03, cL/2 - 0.04), (cW/2 - 0.03, cL/2 - 0.04)] {
+            // Swerve module housing
+            let housing = SCNCylinder(radius: 0.025, height: 0.02)
+            let hMat = SCNMaterial(); hMat.diffuse.contents = UIColor(white: 0.3, alpha: 1)
+            housing.materials = [hMat]
+            let hn = SCNNode(geometry: housing)
+            hn.position = SCNVector3(Float(ox), 0.01, Float(oz))
+            root.addChildNode(hn)
 
-        case .dualRail:
-            for dx: Float in [-0.08, 0.08] {
-                let r = SCNBox(width: 0.015, height: 0.4, length: 0.015, chamferRadius: 0)
-                let m = SCNMaterial(); m.diffuse.contents = UIColor.systemRed; r.materials = [m]
-                let n = SCNNode(geometry: r); n.position = SCNVector3(dx, h+0.2, 0); root.addChildNode(n)
-            }
-            let t = SCNBox(width: 0.14, height: 0.02, length: 0.12, chamferRadius: 0.005)
-            let tm = SCNMaterial(); tm.diffuse.contents = UIColor.systemRed.withAlphaComponent(0.7); t.materials = [tm]
-            let tn = SCNNode(geometry: t); tn.position = SCNVector3(0, h+0.3, 0); root.addChildNode(tn)
-
-        case .turretIntake:
-            let b = SCNCylinder(radius: 0.06, height: 0.04)
-            let bm = SCNMaterial(); bm.diffuse.contents = UIColor.systemIndigo; b.materials = [bm]
-            let bn = SCNNode(geometry: b); bn.position = SCNVector3(0, h+0.02, 0); root.addChildNode(bn)
-            let a = SCNBox(width: 0.03, height: 0.03, length: 0.14, chamferRadius: 0)
-            let am = SCNMaterial(); am.diffuse.contents = UIColor.systemIndigo.withAlphaComponent(0.8); a.materials = [am]
-            let an = SCNNode(geometry: a); an.position = SCNVector3(0, h+0.05, 0.05); root.addChildNode(an)
-
-        case .wedge:
-            let w = SCNBox(width: 0.3, height: 0.05, length: 0.2, chamferRadius: 0.01)
-            let wm = SCNMaterial(); wm.diffuse.contents = UIColor.systemGreen; w.materials = [wm]
-            let wn = SCNNode(geometry: w); wn.position = SCNVector3(0, h+0.025, 0.14)
-            wn.eulerAngles.x = -0.2; root.addChildNode(wn)
-            let p = SCNBox(width: 0.32, height: 0.08, length: 0.02, chamferRadius: 0)
-            let pm = SCNMaterial(); pm.diffuse.contents = UIColor.systemGreen.withAlphaComponent(0.7); p.materials = [pm]
-            let pn = SCNNode(geometry: p); pn.position = SCNVector3(0, h+0.04, 0.22); root.addChildNode(pn)
+            // Wheel
+            let wheel = SCNCylinder(radius: wheelR, height: wheelH)
+            wheel.materials = [wMat]
+            let wn = SCNNode(geometry: wheel)
+            wn.eulerAngles.z = .pi / 2
+            wn.position = SCNVector3(Float(ox), Float(wheelR), Float(oz))
+            root.addChildNode(wn)
         }
     }
+
+    private static func addTankWheels(to root: SCNNode, cW: CGFloat, cL: CGFloat) {
+        let wheelR: CGFloat = 0.04
+        let wheelH: CGFloat = 0.02
+        let wMat = SCNMaterial(); wMat.diffuse.contents = UIColor.darkGray
+
+        // 6 wheels (3 per side)
+        for side: CGFloat in [-1, 1] {
+            for zOff: CGFloat in [-cL/2 + 0.05, 0, cL/2 - 0.05] {
+                let wheel = SCNCylinder(radius: wheelR, height: wheelH)
+                wheel.materials = [wMat]
+                let wn = SCNNode(geometry: wheel)
+                wn.eulerAngles.z = .pi / 2
+                wn.position = SCNVector3(Float(side * (cW/2 - 0.01)), Float(wheelR), Float(zOff))
+                root.addChildNode(wn)
+            }
+        }
+    }
+
+    // MARK: - Superstructures
+
+    private static func addElevator(to root: SCNNode, baseY: Float, color: UIColor) {
+        // Cascading elevator: 2 nested stages
+        let railColor = UIColor(white: 0.45, alpha: 1)
+
+        // Outer rails
+        for dx: Float in [-0.06, 0.06] {
+            let rail = SCNBox(width: 0.018, height: 0.38, length: 0.018, chamferRadius: 0)
+            let rm = SCNMaterial(); rm.diffuse.contents = railColor; rail.materials = [rm]
+            let rn = SCNNode(geometry: rail)
+            rn.position = SCNVector3(dx, baseY + 0.19, -0.04)
+            root.addChildNode(rn)
+        }
+
+        // Inner stage (slides up) - shown at mid-height
+        let innerStage = SCNNode()
+        innerStage.name = "elevator_stage"
+        for dx: Float in [-0.04, 0.04] {
+            let inner = SCNBox(width: 0.012, height: 0.30, length: 0.012, chamferRadius: 0)
+            let im = SCNMaterial(); im.diffuse.contents = UIColor(white: 0.55, alpha: 1); inner.materials = [im]
+            let iNode = SCNNode(geometry: inner)
+            iNode.position = SCNVector3(dx, 0.15, 0)
+            innerStage.addChildNode(iNode)
+        }
+        innerStage.position = SCNVector3(0, baseY + 0.08, -0.04)
+        root.addChildNode(innerStage)
+
+        // End effector (claw/grabber at top of inner stage)
+        let claw = SCNBox(width: 0.10, height: 0.025, length: 0.06, chamferRadius: 0.005)
+        let clawMat = SCNMaterial()
+        clawMat.diffuse.contents = color.withAlphaComponent(0.7)
+        claw.materials = [clawMat]
+        let clawNode = SCNNode(geometry: claw)
+        clawNode.position = SCNVector3(0, 0.30, 0.02)
+        innerStage.addChildNode(clawNode)
+
+        // Cross brace
+        let brace = SCNBox(width: 0.12, height: 0.01, length: 0.01, chamferRadius: 0)
+        let brMat = SCNMaterial(); brMat.diffuse.contents = railColor; brace.materials = [brMat]
+        let brNode = SCNNode(geometry: brace)
+        brNode.position = SCNVector3(0, baseY + 0.37, -0.04)
+        root.addChildNode(brNode)
+    }
+
+    private static func addPivotArm(to root: SCNNode, baseY: Float, color: UIColor) {
+        // Pivot point at rear of robot
+        let pivotY = baseY + 0.04
+
+        // Arm (angled tube)
+        let armLen: Float = 0.28
+        let arm = SCNCylinder(radius: 0.012, height: CGFloat(armLen))
+        let aMat = SCNMaterial(); aMat.diffuse.contents = UIColor.systemOrange; arm.materials = [aMat]
+        let armNode = SCNNode(geometry: arm)
+        armNode.position = SCNVector3(0, pivotY + armLen * 0.4, 0.02)
+        armNode.eulerAngles.x = 0.35  // tilted forward
+        armNode.name = "pivot_arm"
+        root.addChildNode(armNode)
+
+        // Gripper at end of arm
+        let grip = SCNBox(width: 0.08, height: 0.02, length: 0.05, chamferRadius: 0.005)
+        let gMat = SCNMaterial(); gMat.diffuse.contents = color.withAlphaComponent(0.7)
+        grip.materials = [gMat]
+        let gripNode = SCNNode(geometry: grip)
+        gripNode.position = SCNVector3(0, pivotY + armLen * 0.7, 0.10)
+        root.addChildNode(gripNode)
+
+        // Pivot base
+        let base = SCNCylinder(radius: 0.025, height: 0.03)
+        let bMat = SCNMaterial(); bMat.diffuse.contents = UIColor(white: 0.35, alpha: 1)
+        base.materials = [bMat]
+        let bn = SCNNode(geometry: base)
+        bn.position = SCNVector3(0, pivotY, -0.06)
+        root.addChildNode(bn)
+    }
+
+    private static func addLowIntake(to root: SCNNode, baseY: Float, cL: Float, color: UIColor) {
+        // Front roller intake
+        let roller = SCNCylinder(radius: 0.028, height: 0.22)
+        let rMat = SCNMaterial(); rMat.diffuse.contents = UIColor.systemTeal; roller.materials = [rMat]
+        let rn = SCNNode(geometry: roller)
+        rn.eulerAngles.z = .pi / 2
+        rn.position = SCNVector3(0, baseY + 0.028, cL / 2 + 0.02)
+        root.addChildNode(rn)
+
+        // Guard plate
+        let guard_ = SCNBox(width: 0.24, height: 0.04, length: 0.06, chamferRadius: 0)
+        let gMat = SCNMaterial(); gMat.diffuse.contents = color.withAlphaComponent(0.4)
+        guard_.materials = [gMat]
+        let gn = SCNNode(geometry: guard_)
+        gn.position = SCNVector3(0, baseY + 0.06, cL / 2 + 0.01)
+        root.addChildNode(gn)
+
+        // Small hopper on top
+        let hopper = SCNBox(width: 0.14, height: 0.03, length: 0.10, chamferRadius: 0.005)
+        let hMat = SCNMaterial(); hMat.diffuse.contents = UIColor(white: 0.3, alpha: 1)
+        hopper.materials = [hMat]
+        let hn = SCNNode(geometry: hopper)
+        hn.position = SCNVector3(0, baseY + 0.015, 0)
+        root.addChildNode(hn)
+    }
+
+    private static func addWedge(to root: SCNNode, baseY: Float, cW: Float, cL: Float, color: UIColor) {
+        // Low wedge for defense
+        let wedge = SCNBox(width: CGFloat(cW + 0.02), height: 0.04, length: 0.18, chamferRadius: 0.005)
+        let wMat = SCNMaterial(); wMat.diffuse.contents = UIColor.systemGreen; wedge.materials = [wMat]
+        let wn = SCNNode(geometry: wedge)
+        wn.position = SCNVector3(0, baseY + 0.02, cL / 2 + 0.06)
+        wn.eulerAngles.x = -0.15
+        root.addChildNode(wn)
+
+        // Push plate
+        let plate = SCNBox(width: CGFloat(cW + 0.04), height: 0.10, length: 0.015, chamferRadius: 0)
+        let pMat = SCNMaterial(); pMat.diffuse.contents = color.withAlphaComponent(0.6)
+        plate.materials = [pMat]
+        let pn = SCNNode(geometry: plate)
+        pn.position = SCNVector3(0, baseY + 0.05, cL / 2 + 0.14)
+        root.addChildNode(pn)
+    }
+
+    // MARK: - Add All Robots to Scene
 
     static func addRobots(to scene: SCNScene, configs: [RobotConfig]) -> [SCNNode] {
         configs.map { config in
             let robot = buildRobot(config: config)
-            robot.position = SCNVector3(config.startPosition.x, 0.15, config.startPosition.y)
-            robot.eulerAngles.y = config.alliance == .red ? Float.pi : 0
+            robot.position = SCNVector3(config.startPosition.x, 0.0, config.startPosition.y)
+            robot.eulerAngles.y = config.alliance == .red ? .pi : 0
             scene.rootNode.addChildNode(robot)
             return robot
         }

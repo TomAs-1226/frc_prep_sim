@@ -3,7 +3,6 @@ import SwiftUI
 
 // MARK: - Game Phase
 
-/// Top-level flow states for the app experience.
 enum GamePhase: Equatable {
     case intro
     case preMatch
@@ -13,7 +12,6 @@ enum GamePhase: Equatable {
 
 // MARK: - Alliance
 
-/// The two competing alliances in an FRC match.
 enum Alliance: String, CaseIterable {
     case red  = "Red"
     case blue = "Blue"
@@ -35,7 +33,6 @@ enum Alliance: String, CaseIterable {
 
 // MARK: - Robot Role
 
-/// Functional roles a robot can take in a match.
 enum RobotRole: String, CaseIterable, Identifiable {
     case scorer   = "Scorer"
     case cycler   = "Cycler"
@@ -54,18 +51,17 @@ enum RobotRole: String, CaseIterable, Identifiable {
     var description: String {
         switch self {
         case .scorer:
-            return "Specializes in placing game pieces accurately. Slower but scores efficiently at reef nodes."
+            return "Places coral accurately on higher reef levels. Slower but scores big."
         case .cycler:
-            return "Fast pick-up and delivery. Cycles pieces rapidly between source and scoring zones."
+            return "Rapid coral delivery between source and reef. Fast cycles, L1-L2 focus."
         case .defender:
-            return "Disrupts opponents by blocking lanes and slowing their cycles. Scores opportunistically."
+            return "Disrupts opponents by blocking lanes. Tough and fast, scores when open."
         }
     }
 }
 
 // MARK: - Alliance Strategy
 
-/// High-level strategy packages the player chooses for their alliance.
 enum AllianceStrategy: String, CaseIterable, Identifiable {
     case aggressive = "Aggressive Scoring"
     case balanced   = "Balanced"
@@ -92,7 +88,7 @@ enum AllianceStrategy: String, CaseIterable, Identifiable {
     var description: String {
         switch self {
         case .aggressive:
-            return "All-in on scoring. High risk, high reward. Leaves defense to luck."
+            return "All-in on scoring. High risk, high reward. No dedicated defense."
         case .balanced:
             return "Mix of scoring and defense. Adaptable mid-match."
         case .defensive:
@@ -100,7 +96,6 @@ enum AllianceStrategy: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Base strategy weights for this package.
     var basePolicy: StrategyPolicy {
         switch self {
         case .aggressive: return StrategyPolicy(scoringWeight: 0.9, defenseWeight: 0.05, endgameWeight: 0.05)
@@ -112,7 +107,6 @@ enum AllianceStrategy: String, CaseIterable, Identifiable {
 
 // MARK: - Auto Plan
 
-/// Autonomous routine complexity for the player's robot.
 enum AutoPlan: String, CaseIterable, Identifiable {
     case safe     = "Safe"
     case moderate = "Moderate"
@@ -139,34 +133,110 @@ enum AutoPlan: String, CaseIterable, Identifiable {
     var description: String {
         switch self {
         case .safe:
-            return "Cross the auto line + score 1 piece. Reliable, guaranteed points."
+            return "Cross auto line + score 1 coral. Reliable guaranteed points."
         case .moderate:
-            return "Score 2 pieces during auto. Needs decent speed and accuracy."
+            return "Score 2 coral during auto. Needs decent speed and accuracy."
         case .risky:
-            return "Attempt 3 pieces in auto. High ceiling but real stall chance."
+            return "Attempt 3 coral in auto. High ceiling but real stall chance."
         }
     }
 
     var piecesAttempted: Int {
         switch self {
-        case .safe: return 1
-        case .moderate: return 2
-        case .risky: return 3
+        case .safe: return 1; case .moderate: return 2; case .risky: return 3
         }
     }
 
     var successRate: Double {
         switch self {
-        case .safe: return 0.95
-        case .moderate: return 0.75
-        case .risky: return 0.45
+        case .safe: return 0.95; case .moderate: return 0.75; case .risky: return 0.45
         }
+    }
+}
+
+// MARK: - Robot Build Configuration
+
+/// Player-configurable robot build options using simple labels.
+struct RobotBuild: Equatable {
+    var drivetrain: DrivetrainType = .swerve
+    var mechanism: MechanismType = .elevator
+    var intake: IntakeType = .claw
+}
+
+enum DrivetrainType: String, CaseIterable, Identifiable {
+    case swerve = "Swerve Drive"
+    case tank   = "Tank Drive"
+
+    var id: String { rawValue }
+    var icon: String {
+        switch self { case .swerve: return "rotate.3d"; case .tank: return "rectangle.on.rectangle" }
+    }
+    var shortLabel: String {
+        switch self { case .swerve: return "Swerve"; case .tank: return "Tank" }
+    }
+    var description: String {
+        switch self {
+        case .swerve: return "Omnidirectional movement. Fast, agile, can strafe. Most competitive teams use swerve."
+        case .tank:   return "Forward/backward + turn. More pushing force, simpler, higher reliability."
+        }
+    }
+    var color: Color {
+        switch self { case .swerve: return .cyan; case .tank: return .orange }
+    }
+}
+
+enum MechanismType: String, CaseIterable, Identifiable {
+    case elevator = "Cascading Elevator"
+    case arm      = "Pivot Arm"
+    case simple   = "Low Intake"
+
+    var id: String { rawValue }
+    var icon: String {
+        switch self { case .elevator: return "arrow.up.and.down"; case .arm: return "arrow.up.right"; case .simple: return "tray.fill" }
+    }
+    var shortLabel: String {
+        switch self { case .elevator: return "Elevator"; case .arm: return "Arm"; case .simple: return "Low" }
+    }
+    var description: String {
+        switch self {
+        case .elevator: return "Reaches all levels L1-L4. Cascading stages extend vertically. Slower but max scoring."
+        case .arm:      return "Pivot arm reaches L1-L3. Versatile and moderate speed. Good all-rounder."
+        case .simple:   return "Ground-level intake, L1-L2 only. Fastest cycle time. Volume over height."
+        }
+    }
+    var color: Color {
+        switch self { case .elevator: return .purple; case .arm: return .orange; case .simple: return .green }
+    }
+    /// Maximum reef level this mechanism can score on
+    var maxLevel: Int {
+        switch self { case .elevator: return 4; case .arm: return 3; case .simple: return 2 }
+    }
+}
+
+enum IntakeType: String, CaseIterable, Identifiable {
+    case claw   = "Claw Grabber"
+    case roller = "Roller Intake"
+
+    var id: String { rawValue }
+    var icon: String {
+        switch self { case .claw: return "hand.point.up.fill"; case .roller: return "gearshape.2.fill" }
+    }
+    var shortLabel: String {
+        switch self { case .claw: return "Claw"; case .roller: return "Rollers" }
+    }
+    var description: String {
+        switch self {
+        case .claw:   return "Precise grip on coral. Slower pickup but very reliable placement."
+        case .roller: return "Spinning rollers grab coral fast. Quick cycles, slightly less accurate."
+        }
+    }
+    var color: Color {
+        switch self { case .claw: return .yellow; case .roller: return .teal }
     }
 }
 
 // MARK: - Strategy Policy
 
-/// Weighted strategy policy that governs robot AI decision-making.
 struct StrategyPolicy {
     var scoringWeight: Double
     var defenseWeight: Double
@@ -183,26 +253,20 @@ struct StrategyPolicy {
     }
 
     var dominantMode: String {
-        if endgameWeight >= scoringWeight && endgameWeight >= defenseWeight {
-            return "Endgame Push"
-        } else if defenseWeight >= scoringWeight {
-            return "Defense Mode"
-        } else {
-            return "Scoring Mode"
-        }
+        if endgameWeight >= scoringWeight && endgameWeight >= defenseWeight { return "Endgame Push" }
+        else if defenseWeight >= scoringWeight { return "Defense Mode" }
+        else { return "Scoring Mode" }
     }
 }
 
 // MARK: - Callout
 
-/// Mid-match strategic callouts the player can trigger (max 3 per match).
 enum Callout: String, CaseIterable, Identifiable {
-    case prioritizeReef = "Prioritize Reef"
-    case switchDefense  = "Switch to Defense"
-    case endgameEarly   = "Endgame Early"
+    case prioritizeReef = "Push Reef"
+    case switchDefense  = "Play Defense"
+    case endgameEarly   = "Endgame Now"
 
     var id: String { rawValue }
-
     var icon: String {
         switch self {
         case .prioritizeReef: return "scope"
@@ -210,7 +274,6 @@ enum Callout: String, CaseIterable, Identifiable {
         case .endgameEarly:   return "flag.checkered"
         }
     }
-
     var color: Color {
         switch self {
         case .prioritizeReef: return .orange
@@ -235,19 +298,18 @@ struct RobotStats {
     let maxSpeed: Float
     let acceleration: Float
     let turnRate: Float
-    let scoringTime: Double
-    let pickupTime: Double
-    let reliability: Double
+    let scoringTime: Double   // seconds to place a piece
+    let pickupTime: Double    // seconds to grab a piece
+    let reliability: Double   // 0-1, chance of successful action
+    let maxReefLevel: Int     // highest reef level reachable (1-4)
 }
 
-// MARK: - Superstructure Type
+// MARK: - Superstructure Type (visual representation)
 
 enum SuperstructureType: String {
     case elevator
     case arm
     case intake
-    case dualRail
-    case turretIntake
     case wedge
 }
 
@@ -259,6 +321,7 @@ struct RobotConfig: Identifiable {
     let role: RobotRole
     let stats: RobotStats
     let superstructure: SuperstructureType
+    let build: RobotBuild
     let teamNumber: String
     let startPosition: SIMD2<Float>
 }
@@ -272,6 +335,7 @@ enum RobotState: String {
     case scoring        = "Scoring"
     case defending      = "Defending"
     case headingEndgame = "→ Endgame"
+    case climbing       = "Climbing"
     case parked         = "Parked"
     case stalled        = "Stalled!"
     case autoPath       = "Auto Path"
@@ -285,40 +349,38 @@ struct GamePiece: Identifiable {
     var state: PieceState
     var carriedBy: Int?
 
-    enum PieceState {
-        case onField
-        case carried
-        case scored
-    }
+    enum PieceState { case onField, carried, scored }
 }
 
-// MARK: - Field Constants
+// MARK: - Field Layout (references FieldSpec)
 
 enum FieldLayout {
-    static let fieldWidth: Float = 8.0
-    static let fieldLength: Float = 4.5
-    static let halfWidth: Float = fieldWidth / 2
-    static let halfLength: Float = fieldLength / 2
+    static let fieldWidth: Float  = FieldSpec.fieldLength  // X extent
+    static let fieldLength: Float = FieldSpec.fieldWidth   // Z extent
+    static let halfWidth: Float   = FieldSpec.halfLength
+    static let halfLength: Float  = FieldSpec.halfWidth
 
-    static let redSource  = SIMD2<Float>(3.2, 0.0)
-    static let blueSource = SIMD2<Float>(-3.2, 0.0)
+    // Coral station approach points (where robots go to pick up)
+    static let redSource: SIMD2<Float>  = SIMD2(3.50, 0.0)
+    static let blueSource: SIMD2<Float> = SIMD2(-3.50, 0.0)
 
-    static let reefNodes: [SIMD2<Float>] = [
-        SIMD2(-0.6, -0.5), SIMD2(0.0, -0.5), SIMD2(0.6, -0.5),
-        SIMD2(-0.6,  0.5), SIMD2(0.0,  0.5), SIMD2(0.6,  0.5),
-    ]
+    // Reef face approach points for scoring (6 per reef)
+    static func redReefApproach(_ faceIndex: Int) -> SIMD2<Float> {
+        FieldSpec.scoringApproach(center: FieldSpec.redReefCenter, faceIndex: faceIndex)
+    }
+    static func blueReefApproach(_ faceIndex: Int) -> SIMD2<Float> {
+        FieldSpec.scoringApproach(center: FieldSpec.blueReefCenter, faceIndex: faceIndex)
+    }
 
-    static let redProcessor  = SIMD2<Float>(2.0, -1.5)
-    static let blueProcessor = SIMD2<Float>(-2.0, -1.5)
-    static let redBarge  = SIMD2<Float>(2.5, 1.8)
-    static let blueBarge = SIMD2<Float>(-2.5, 1.8)
+    static let redProcessor  = FieldSpec.redProcessor
+    static let blueProcessor = FieldSpec.blueProcessor
 
-    static let redStarts: [SIMD2<Float>] = [
-        SIMD2(2.8, -0.8), SIMD2(3.2, 0.0), SIMD2(2.8, 0.8)
-    ]
-    static let blueStarts: [SIMD2<Float>] = [
-        SIMD2(-2.8, -0.8), SIMD2(-3.2, 0.0), SIMD2(-2.8, 0.8)
-    ]
+    // Barge parking zones (one per alliance side of barge)
+    static let redBarge  = SIMD2<Float>( 0.35, 0.0)
+    static let blueBarge = SIMD2<Float>(-0.35, 0.0)
+
+    static let redStarts  = FieldSpec.redStarts
+    static let blueStarts = FieldSpec.blueStarts
 }
 
 // MARK: - Match Timing
@@ -330,22 +392,13 @@ enum MatchTiming {
     static let totalDuration: Double = 150.0
 }
 
-// MARK: - Score Values
-
-enum ScoreValues {
-    static let autoTaxi: Int = 3
-    static let autoReefNode: Int = 6
-    static let teleopReefNode: Int = 3
-    static let processorScore: Int = 6
-    static let bargeClimb: Int = 12
-}
-
 // MARK: - Match Result
 
 struct MatchResult {
     let playerStrategy: AllianceStrategy
     let playerRole: RobotRole
     let playerAuto: AutoPlan
+    let playerBuild: RobotBuild
     let redScore: Int
     let blueScore: Int
     let redBreakdown: ScoreBreakdown
@@ -367,6 +420,10 @@ struct ScoreBreakdown {
     var endgamePoints: Int = 0
     var totalPieces: Int = 0
     var processorPieces: Int = 0
+    var coralL1: Int = 0
+    var coralL2: Int = 0
+    var coralL3: Int = 0
+    var coralL4: Int = 0
     var total: Int { autoPoints + teleopPoints + endgamePoints }
 }
 
@@ -375,29 +432,22 @@ struct ScoreBreakdown {
 struct SeededRNG: RandomNumberGenerator {
     private var state: UInt64
 
-    init(seed: UInt64 = 42) {
-        state = seed == 0 ? 1 : seed
-    }
+    init(seed: UInt64 = 42) { state = seed == 0 ? 1 : seed }
 
     mutating func next() -> UInt64 {
-        state ^= state << 13
-        state ^= state >> 7
-        state ^= state << 17
-        return state
+        state ^= state << 13; state ^= state >> 7; state ^= state << 17; return state
     }
-
-    mutating func nextDouble() -> Double {
-        Double(next() & 0x1FFFFFFFFFFFFF) / Double(1 << 53)
-    }
-
-    mutating func nextFloat() -> Float {
-        Float(nextDouble())
+    mutating func nextDouble() -> Double { Double(next() & 0x1FFFFFFFFFFFFF) / Double(1 << 53) }
+    mutating func nextFloat() -> Float { Float(nextDouble()) }
+    mutating func nextInt(_ range: Range<Int>) -> Int {
+        guard range.count > 0 else { return range.lowerBound }
+        return range.lowerBound + Int(next() % UInt64(range.count))
     }
 }
 
 // MARK: - Coaching Tip
 
-struct CoachingTip {
+struct CoachingTip: Equatable {
     let headline: String
     let detail: String
     let highlightRobotId: Int?
@@ -405,84 +455,123 @@ struct CoachingTip {
 
 // MARK: - Robot Factory
 
-/// Builds the 6 robot configurations for a match.
 enum RobotFactory {
 
-    static func buildRobots(playerRole: RobotRole, strategy: AllianceStrategy) -> [RobotConfig] {
+    static func buildRobots(playerRole: RobotRole, strategy: AllianceStrategy,
+                            playerBuild: RobotBuild) -> [RobotConfig] {
         var configs: [RobotConfig] = []
 
         // --- Red Alliance (player's team) ---
-        let playerStats = statsForRole(playerRole, boost: true)
+        let playerStats = statsForBuild(playerBuild, role: playerRole, boost: true)
         configs.append(RobotConfig(
             id: 0, alliance: .red, role: playerRole,
-            stats: playerStats, superstructure: superstructureForRole(playerRole),
+            stats: playerStats,
+            superstructure: superstructureForMechanism(playerBuild.mechanism),
+            build: playerBuild,
             teamNumber: "9999", startPosition: FieldLayout.redStarts[0]
         ))
 
-        let comp1 = complementRole1(for: strategy, playerRole: playerRole)
+        let comp1Role = complementRole1(for: strategy, playerRole: playerRole)
+        let comp1Build = defaultBuild(for: comp1Role)
         configs.append(RobotConfig(
-            id: 1, alliance: .red, role: comp1,
-            stats: statsForRole(comp1, boost: false),
-            superstructure: superstructureForRole(comp1),
+            id: 1, alliance: .red, role: comp1Role,
+            stats: statsForBuild(comp1Build, role: comp1Role, boost: false),
+            superstructure: superstructureForMechanism(comp1Build.mechanism),
+            build: comp1Build,
             teamNumber: "2468", startPosition: FieldLayout.redStarts[1]
         ))
 
-        let comp2 = complementRole2(for: strategy, playerRole: playerRole)
+        let comp2Role = complementRole2(for: strategy, playerRole: playerRole)
+        let comp2Build = defaultBuild(for: comp2Role)
         configs.append(RobotConfig(
-            id: 2, alliance: .red, role: comp2,
-            stats: statsForRole(comp2, boost: false),
-            superstructure: superstructureForRole(comp2),
+            id: 2, alliance: .red, role: comp2Role,
+            stats: statsForBuild(comp2Build, role: comp2Role, boost: false),
+            superstructure: superstructureForMechanism(comp2Build.mechanism),
+            build: comp2Build,
             teamNumber: "1357", startPosition: FieldLayout.redStarts[2]
         ))
 
-        // --- Blue Alliance (opponent, fixed balanced strategy) ---
+        // --- Blue Alliance (opponents, balanced strategy) ---
+        let blueBuild1 = RobotBuild(drivetrain: .swerve, mechanism: .elevator, intake: .claw)
         configs.append(RobotConfig(
             id: 3, alliance: .blue, role: .scorer,
-            stats: RobotStats(maxSpeed: 1.8, acceleration: 1.2, turnRate: 2.5,
-                              scoringTime: 1.2, pickupTime: 1.0, reliability: 0.92),
-            superstructure: .elevator, teamNumber: "254",
-            startPosition: FieldLayout.blueStarts[0]
+            stats: statsForBuild(blueBuild1, role: .scorer, boost: false),
+            superstructure: .elevator, build: blueBuild1,
+            teamNumber: "254", startPosition: FieldLayout.blueStarts[0]
         ))
 
+        let blueBuild2 = RobotBuild(drivetrain: .swerve, mechanism: .simple, intake: .roller)
         configs.append(RobotConfig(
             id: 4, alliance: .blue, role: .cycler,
-            stats: RobotStats(maxSpeed: 2.8, acceleration: 2.0, turnRate: 3.5,
-                              scoringTime: 1.8, pickupTime: 0.8, reliability: 0.88),
-            superstructure: .turretIntake, teamNumber: "1678",
-            startPosition: FieldLayout.blueStarts[1]
+            stats: statsForBuild(blueBuild2, role: .cycler, boost: false),
+            superstructure: .intake, build: blueBuild2,
+            teamNumber: "1678", startPosition: FieldLayout.blueStarts[1]
         ))
 
+        let blueBuild3 = RobotBuild(drivetrain: .tank, mechanism: .simple, intake: .roller)
         configs.append(RobotConfig(
             id: 5, alliance: .blue, role: .defender,
-            stats: RobotStats(maxSpeed: 3.0, acceleration: 2.5, turnRate: 4.0,
-                              scoringTime: 2.5, pickupTime: 1.5, reliability: 0.95),
-            superstructure: .wedge, teamNumber: "118",
-            startPosition: FieldLayout.blueStarts[2]
+            stats: statsForBuild(blueBuild3, role: .defender, boost: false),
+            superstructure: .wedge, build: blueBuild3,
+            teamNumber: "118", startPosition: FieldLayout.blueStarts[2]
         ))
 
         return configs
     }
 
-    private static func statsForRole(_ role: RobotRole, boost: Bool) -> RobotStats {
+    static func statsForBuild(_ build: RobotBuild, role: RobotRole, boost: Bool) -> RobotStats {
         let b: Float = boost ? 0.15 : 0.0
+
+        // Base speed from drivetrain
+        let baseSpeed: Float = build.drivetrain == .swerve ? 2.4 : 1.9
+        let baseTurn: Float = build.drivetrain == .swerve ? 3.5 : 2.0
+        let baseReliability: Double = build.drivetrain == .tank ? 0.96 : 0.90
+
+        // Scoring time from mechanism
+        let baseScoringTime: Double
+        switch build.mechanism {
+        case .elevator: baseScoringTime = 1.4
+        case .arm:      baseScoringTime = 1.1
+        case .simple:   baseScoringTime = 0.7
+        }
+
+        // Pickup time from intake
+        let basePickup: Double = build.intake == .roller ? 0.6 : 0.9
+        let intakeReliability: Double = build.intake == .claw ? 0.05 : -0.02
+
+        // Role adjustments
+        let speedMod: Float
+        let scoringMod: Double
         switch role {
-        case .scorer:
-            return RobotStats(maxSpeed: 1.6 + b, acceleration: 1.2, turnRate: 2.5,
-                              scoringTime: 1.0, pickupTime: 1.0, reliability: 0.93)
-        case .cycler:
-            return RobotStats(maxSpeed: 2.8 + b, acceleration: 2.2, turnRate: 3.5,
-                              scoringTime: 1.6, pickupTime: 0.7, reliability: 0.87)
-        case .defender:
-            return RobotStats(maxSpeed: 3.2 + b, acceleration: 2.8, turnRate: 4.2,
-                              scoringTime: 2.5, pickupTime: 1.5, reliability: 0.95)
+        case .scorer:   speedMod = -0.2; scoringMod = -0.15
+        case .cycler:   speedMod =  0.3; scoringMod =  0.1
+        case .defender: speedMod =  0.5; scoringMod =  0.4
+        }
+
+        return RobotStats(
+            maxSpeed: baseSpeed + speedMod + b,
+            acceleration: build.drivetrain == .swerve ? 2.0 : 1.6,
+            turnRate: baseTurn,
+            scoringTime: max(0.5, baseScoringTime + scoringMod),
+            pickupTime: basePickup,
+            reliability: min(0.98, baseReliability + intakeReliability),
+            maxReefLevel: build.mechanism.maxLevel
+        )
+    }
+
+    private static func defaultBuild(for role: RobotRole) -> RobotBuild {
+        switch role {
+        case .scorer:   return RobotBuild(drivetrain: .swerve, mechanism: .elevator, intake: .claw)
+        case .cycler:   return RobotBuild(drivetrain: .swerve, mechanism: .arm, intake: .roller)
+        case .defender: return RobotBuild(drivetrain: .tank, mechanism: .simple, intake: .roller)
         }
     }
 
-    private static func superstructureForRole(_ role: RobotRole) -> SuperstructureType {
-        switch role {
-        case .scorer:   return .dualRail
-        case .cycler:   return .arm
-        case .defender: return .wedge
+    private static func superstructureForMechanism(_ mech: MechanismType) -> SuperstructureType {
+        switch mech {
+        case .elevator: return .elevator
+        case .arm:      return .arm
+        case .simple:   return .intake
         }
     }
 

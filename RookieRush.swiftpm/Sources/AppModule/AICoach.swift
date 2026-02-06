@@ -106,10 +106,14 @@ final class AICoach: ObservableObject {
         let calloutNote = result.calloutsUsed.isEmpty
             ? "They didn't use any mid-match callouts."
             : "They used these callouts: \(result.calloutsUsed.map { $0.rawValue }.joined(separator: ", "))."
+        let buildNote = "They built a \(result.playerBuild.drivetrain.shortLabel) drive robot " +
+            "with a \(result.playerBuild.mechanism.shortLabel) mechanism (max L\(result.playerBuild.mechanism.maxLevel)) " +
+            "and \(result.playerBuild.intake.shortLabel) intake."
 
         return """
         The student chose "\(result.playerStrategy.rawValue)" alliance strategy, \
         "\(result.playerRole.rawValue)" robot role, and "\(result.playerAuto.rawValue)" auto routine.
+        \(buildNote)
 
         Match results:
         - Red alliance (player's team) \(outcome)
@@ -118,6 +122,8 @@ final class AICoach: ObservableObject {
         - Blue score: \(result.blueScore) (Auto: \(result.blueBreakdown.autoPoints), \
         Teleop: \(result.blueBreakdown.teleopPoints), Endgame: \(result.blueBreakdown.endgamePoints))
         - Player's robot scored \(result.playerRobotScored) pieces and completed \(result.playerRobotCycled) cycles
+        - Coral scored: L1=\(result.redBreakdown.coralL1), L2=\(result.redBreakdown.coralL2), \
+        L3=\(result.redBreakdown.coralL3), L4=\(result.redBreakdown.coralL4)
         - \(stallNote)
         - \(calloutNote)
         - \(result.slowMoUsed ? "They used the slow-mo coaching feature." : "They didn't use slow-mo coaching.")

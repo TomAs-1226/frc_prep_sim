@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Results View
 
-/// Post-match results with score breakdown and AI coaching feedback.
+/// Post-match results with score breakdown, build choices, and AI coaching feedback.
 struct ResultsView: View {
     let result: MatchResult
     let onTryAgain: () -> Void
@@ -24,30 +24,24 @@ struct ResultsView: View {
 
             ScrollView {
                 VStack(spacing: 24) {
-                    // Header
                     headerSection
                         .padding(.top, 24)
 
-                    // Score comparison
                     scoreComparison
                         .padding(.horizontal, 20)
 
-                    // Score breakdown
                     if showBreakdown {
                         breakdownSection
                             .padding(.horizontal, 20)
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
 
-                    // Your choices
                     choicesSection
                         .padding(.horizontal, 20)
 
-                    // AI Coaching
                     coachingCard
                         .padding(.horizontal, 20)
 
-                    // Try again
                     Button(action: onTryAgain) {
                         HStack(spacing: 8) {
                             Image(systemName: "arrow.counterclockwise")
@@ -64,7 +58,11 @@ struct ResultsView: View {
                         .modifier(GlassModifier(shape: RoundedRectangle(cornerRadius: 14)))
                     }
                     .accessibilityLabel("Try again with different strategy choices")
-                    .padding(.bottom, 40)
+
+                    Text("Demo Level 1 — future levels will be more in-depth")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.2))
+                        .padding(.bottom, 40)
                 }
             }
         }
@@ -120,7 +118,6 @@ struct ResultsView: View {
     @ViewBuilder
     private var scoreComparison: some View {
         HStack(spacing: 16) {
-            // Red
             VStack(spacing: 6) {
                 Text("RED ALLIANCE")
                     .font(.system(size: 9, weight: .bold))
@@ -141,7 +138,6 @@ struct ResultsView: View {
                 .font(.caption.bold())
                 .foregroundStyle(.white.opacity(0.3))
 
-            // Blue
             VStack(spacing: 6) {
                 Text("BLUE ALLIANCE")
                     .font(.system(size: 9, weight: .bold))
@@ -186,6 +182,20 @@ struct ResultsView: View {
                 Divider().background(Color.white.opacity(0.1)).frame(height: 80)
                 breakdownColumn(title: "BLUE", breakdown: result.blueBreakdown,
                                 color: Color(red: 0.3, green: 0.5, blue: 1.0))
+            }
+
+            // Coral level breakdown for red
+            if result.redBreakdown.totalPieces > 0 {
+                HStack(spacing: 12) {
+                    levelStat("L1", count: result.redBreakdown.coralL1, color: .green)
+                    levelStat("L2", count: result.redBreakdown.coralL2, color: .green)
+                    levelStat("L3", count: result.redBreakdown.coralL3, color: .yellow)
+                    levelStat("L4", count: result.redBreakdown.coralL4, color: .red)
+                    if result.redBreakdown.processorPieces > 0 {
+                        levelStat("Proc", count: result.redBreakdown.processorPieces, color: .cyan)
+                    }
+                }
+                .padding(.top, 2)
             }
 
             // Player robot stats
@@ -233,6 +243,18 @@ struct ResultsView: View {
     }
 
     @ViewBuilder
+    private func levelStat(_ label: String, count: Int, color: Color) -> some View {
+        VStack(spacing: 1) {
+            Text("\(count)")
+                .font(.caption.bold())
+                .foregroundStyle(count > 0 ? color : .white.opacity(0.2))
+            Text(label)
+                .font(.system(size: 8))
+                .foregroundStyle(.white.opacity(0.35))
+        }
+    }
+
+    @ViewBuilder
     private func playerStat(icon: String, value: String, label: String) -> some View {
         VStack(spacing: 3) {
             Image(systemName: icon)
@@ -257,6 +279,8 @@ struct ResultsView: View {
                 .font(.caption.bold())
                 .foregroundStyle(.white.opacity(0.4))
                 .tracking(1)
+
+            // Strategy + Role + Auto
             HStack(spacing: 10) {
                 choiceChip(icon: result.playerStrategy.icon, label: result.playerStrategy.rawValue,
                            color: result.playerStrategy.color)
@@ -264,6 +288,19 @@ struct ResultsView: View {
                            color: .cyan)
                 choiceChip(icon: result.playerAuto.icon, label: "\(result.playerAuto.rawValue) Auto",
                            color: result.playerAuto.color)
+            }
+
+            // Robot build
+            HStack(spacing: 10) {
+                choiceChip(icon: result.playerBuild.drivetrain.icon,
+                           label: result.playerBuild.drivetrain.shortLabel,
+                           color: result.playerBuild.drivetrain.color)
+                choiceChip(icon: result.playerBuild.mechanism.icon,
+                           label: result.playerBuild.mechanism.shortLabel,
+                           color: result.playerBuild.mechanism.color)
+                choiceChip(icon: result.playerBuild.intake.icon,
+                           label: result.playerBuild.intake.shortLabel,
+                           color: result.playerBuild.intake.color)
             }
         }
         .padding(14)

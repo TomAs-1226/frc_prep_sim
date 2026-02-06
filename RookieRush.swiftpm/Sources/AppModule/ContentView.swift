@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var phase: GamePhase = .intro
     @State private var strategy: AllianceStrategy?
     @State private var role: RobotRole?
+    @State private var robotBuild: RobotBuild?
     @State private var autoPlan: AutoPlan?
     @State private var matchResult: MatchResult?
     @State private var showSettings = false
@@ -22,8 +23,8 @@ struct ContentView: View {
                     .transition(.opacity)
 
                 case .preMatch:
-                    PreMatchView { strat, r, auto in
-                        strategy = strat; role = r; autoPlan = auto
+                    PreMatchView { strat, r, build, auto in
+                        strategy = strat; role = r; robotBuild = build; autoPlan = auto
                         withAnimation(.easeInOut(duration: 0.4)) { phase = .simulation }
                     }
                     .transition(.asymmetric(
@@ -32,8 +33,8 @@ struct ContentView: View {
                     ))
 
                 case .simulation:
-                    if let strat = strategy, let r = role, let auto = autoPlan {
-                        MatchView(strategy: strat, playerRole: r, autoPlan: auto) { result in
+                    if let strat = strategy, let r = role, let build = robotBuild, let auto = autoPlan {
+                        MatchView(strategy: strat, playerRole: r, playerBuild: build, autoPlan: auto) { result in
                             matchResult = result
                             withAnimation(.easeInOut(duration: 0.5)) { phase = .results }
                         }
@@ -81,7 +82,7 @@ struct ContentView: View {
     }
 
     private func resetGame() {
-        strategy = nil; role = nil; autoPlan = nil; matchResult = nil
+        strategy = nil; role = nil; robotBuild = nil; autoPlan = nil; matchResult = nil
         withAnimation(.easeInOut(duration: 0.4)) { phase = .intro }
     }
 }
