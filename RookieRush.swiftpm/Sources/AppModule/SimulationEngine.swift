@@ -1222,7 +1222,7 @@ final class MatchEngine: ObservableObject {
             { [self] in
                 return CoachingTip(
                     headline: "Strategy Impact",
-                    detail: "Your alliance is in \"\(strategyMode)\". Use callouts to shift mid-match! You have \(calloutsRemaining) callout\(calloutsRemaining == 1 ? "" : "s") remaining from 6 options.",
+                    detail: "Your alliance is in \"\(strategyMode)\". Use callouts to shift mid-match! \(activeCallouts.count) callout\(activeCallouts.count == 1 ? " is" : "s are") active. \(calloutCooldown > 0 ? String(format: "Cooldown: %.0fs", calloutCooldown) : "Ready to call!")",
                     highlightRobotId: nil
                 )
             },
