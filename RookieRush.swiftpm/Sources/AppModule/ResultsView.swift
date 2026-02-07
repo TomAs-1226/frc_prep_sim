@@ -338,120 +338,11 @@ struct ResultsView: View {
                 .foregroundStyle(.white.opacity(0.4))
                 .tracking(1)
 
-            // Node flow: Strategy → Role → Build → Auto → Match
             VStack(spacing: 0) {
-                // Strategy node
-                decisionNode(
-                    icon: result.playerStrategy.icon,
-                    label: result.playerStrategy.rawValue,
-                    detail: "Alliance strategy",
-                    color: result.playerStrategy.color,
-                    isStart: true
-                )
+                decisionNodesList
+                calloutEventsList
                 nodeConnector()
-
-                // Role node
-                decisionNode(
-                    icon: result.playerRole.icon,
-                    label: result.playerRole.rawValue,
-                    detail: "Your role",
-                    color: .cyan,
-                    isStart: false
-                )
-                nodeConnector()
-
-                // Build node
-                decisionNode(
-                    icon: "wrench.and.screwdriver.fill",
-                    label: "\(result.playerBuild.drivetrain.shortLabel) / \(result.playerBuild.mechanism.shortLabel) / \(result.playerBuild.intake.shortLabel)",
-                    detail: "Robot build (max L\(result.playerBuild.mechanism.maxLevel))",
-                    color: .orange,
-                    isStart: false
-                )
-                nodeConnector()
-
-                // Auto node
-                decisionNode(
-                    icon: result.playerAuto.icon,
-                    label: "\(result.playerAuto.rawValue) Auto",
-                    detail: result.didPlayerStall ? "Stalled!" : "\(result.playerAuto.piecesAttempted) pieces attempted",
-                    color: result.didPlayerStall ? .red : result.playerAuto.color,
-                    isStart: false
-                )
-
-                // Callout events
-                if !result.calloutEvents.isEmpty {
-                    nodeConnector()
-                    VStack(spacing: 4) {
-                        ForEach(Array(result.calloutEvents.enumerated()), id: \.offset) { _, event in
-                            let timeStr = formatTime(event.matchTime)
-                            HStack(spacing: 8) {
-                                Image(systemName: event.callout.icon)
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(event.callout.color)
-                                    .frame(width: 20)
-
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(event.callout.rawValue)
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundStyle(.white.opacity(0.8))
-                                    Text("@\(timeStr) — Score: \(event.redScoreAtTime)-\(event.blueScoreAtTime)")
-                                        .font(.system(size: 8))
-                                        .foregroundStyle(.white.opacity(0.4))
-                                }
-
-                                Spacer()
-
-                                Circle()
-                                    .fill(event.callout.color.opacity(0.3))
-                                    .frame(width: 8, height: 8)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 5)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(event.callout.color.opacity(0.06))
-                            )
-                        }
-                    }
-                    .padding(.leading, 24)
-                }
-
-                nodeConnector()
-
-                // Outcome node
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(result.playerWon ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
-                            .frame(width: 36, height: 36)
-                        Image(systemName: result.playerWon ? "trophy.fill" : (result.margin == 0 ? "equal.circle.fill" : "xmark.circle.fill"))
-                            .font(.body)
-                            .foregroundStyle(result.playerWon ? .yellow : (result.margin == 0 ? .orange : .red))
-                    }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(result.playerWon ? "VICTORY" : (result.margin == 0 ? "TIE" : "DEFEAT"))
-                            .font(.system(size: 11, weight: .black))
-                            .foregroundStyle(result.playerWon ? .green : (result.margin == 0 ? .orange : .red))
-                        Text("\(result.redScore) - \(result.blueScore) (\(result.margin)pt \(result.playerWon ? "lead" : "gap"))")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.white.opacity(0.5))
-                    }
-                    Spacer()
-                }
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.white.opacity(0.04))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .strokeBorder(
-                                    (result.playerWon ? Color.green : (result.margin == 0 ? Color.orange : Color.red)).opacity(0.3),
-                                    lineWidth: 1
-                                )
-                        )
-                )
+                outcomeNode
             }
         }
         .padding(14)
@@ -461,6 +352,133 @@ struct ResultsView: View {
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Decision map showing your choices and match outcome")
+    }
+
+    @ViewBuilder
+    private var decisionNodesList: some View {
+        decisionNode(
+            icon: result.playerStrategy.icon,
+            label: result.playerStrategy.rawValue,
+            detail: "Alliance strategy",
+            color: result.playerStrategy.color,
+            isStart: true
+        )
+        nodeConnector()
+
+        decisionNode(
+            icon: result.playerRole.icon,
+            label: result.playerRole.rawValue,
+            detail: "Your role",
+            color: .cyan,
+            isStart: false
+        )
+        nodeConnector()
+
+        let buildLabel = "\(result.playerBuild.drivetrain.shortLabel) / \(result.playerBuild.mechanism.shortLabel) / \(result.playerBuild.intake.shortLabel)"
+        decisionNode(
+            icon: "wrench.and.screwdriver.fill",
+            label: buildLabel,
+            detail: "Robot build (max L\(result.playerBuild.mechanism.maxLevel))",
+            color: .orange,
+            isStart: false
+        )
+        nodeConnector()
+
+        let autoDetail: String = result.didPlayerStall ? "Stalled!" : "\(result.playerAuto.piecesAttempted) pieces attempted"
+        let autoColor: Color = result.didPlayerStall ? .red : result.playerAuto.color
+        decisionNode(
+            icon: result.playerAuto.icon,
+            label: "\(result.playerAuto.rawValue) Auto",
+            detail: autoDetail,
+            color: autoColor,
+            isStart: false
+        )
+    }
+
+    @ViewBuilder
+    private var calloutEventsList: some View {
+        if !result.calloutEvents.isEmpty {
+            nodeConnector()
+            VStack(spacing: 4) {
+                ForEach(Array(result.calloutEvents.enumerated()), id: \.offset) { _, event in
+                    calloutEventRow(event: event)
+                }
+            }
+            .padding(.leading, 24)
+        }
+    }
+
+    @ViewBuilder
+    private func calloutEventRow(event: CalloutEvent) -> some View {
+        let timeStr = formatTime(event.matchTime)
+        HStack(spacing: 8) {
+            Image(systemName: event.callout.icon)
+                .font(.system(size: 10))
+                .foregroundStyle(event.callout.color)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(event.callout.rawValue)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.8))
+                Text("@\(timeStr) — Score: \(event.redScoreAtTime)-\(event.blueScoreAtTime)")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+
+            Spacer()
+
+            Circle()
+                .fill(event.callout.color.opacity(0.3))
+                .frame(width: 8, height: 8)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(event.callout.color.opacity(0.06))
+        )
+    }
+
+    @ViewBuilder
+    private var outcomeNode: some View {
+        let won = result.playerWon
+        let tied = result.margin == 0
+        let outcomeColor: Color = won ? .green : (tied ? .orange : .red)
+        let iconName: String = won ? "trophy.fill" : (tied ? "equal.circle.fill" : "xmark.circle.fill")
+        let iconColor: Color = won ? .yellow : (tied ? .orange : .red)
+        let label = won ? "VICTORY" : (tied ? "TIE" : "DEFEAT")
+        let gapLabel = won ? "lead" : "gap"
+
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(outcomeColor.opacity(0.2))
+                    .frame(width: 36, height: 36)
+                Image(systemName: iconName)
+                    .font(.body)
+                    .foregroundStyle(iconColor)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.system(size: 11, weight: .black))
+                    .foregroundStyle(outcomeColor)
+                Text("\(result.redScore) - \(result.blueScore) (\(result.margin)pt \(gapLabel))")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            Spacer()
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(outcomeColor.opacity(0.3), lineWidth: 1)
+                )
+        )
     }
 
     @ViewBuilder
