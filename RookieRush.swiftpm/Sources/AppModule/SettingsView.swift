@@ -77,9 +77,9 @@ struct SettingsView: View {
 
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Match Coach: Robotics Strategy Lab")
+                        Text("Match Coach: FRC Strategy Lab")
                             .font(.headline)
-                        Text("An interactive robotics strategy experience where you lead a 3-robot alliance through a simulated competition match. Choose strategy, role, and auto — then watch how your decisions play out.")
+                        Text("An interactive strategy experience inspired by FRC (FIRST Robotics Competition). Lead a 3-robot alliance through a simulated match. Choose strategy, role, and auto — then watch how your decisions play out.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Text("Built for Swift Student Challenge 2026")

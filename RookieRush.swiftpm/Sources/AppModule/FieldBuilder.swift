@@ -1,7 +1,7 @@
 import SceneKit
 
 // MARK: - Field Builder
-// Constructs a competition-style robotics field from FieldSpec coordinates.
+// Constructs an FRC Reefscape-inspired competition field from FieldSpec coordinates.
 // All geometry is procedural — no imported assets.
 // Coherent minimalist art style: dark surface, clean shapes, alliance colors.
 

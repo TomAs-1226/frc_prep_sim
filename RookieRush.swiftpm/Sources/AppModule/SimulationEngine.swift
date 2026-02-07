@@ -31,6 +31,10 @@ class RobotAgent {
     var lastFaceUsed: Int = -1
     weak var sceneNode: SCNNode?
 
+    // Score awareness (updated each tick by MatchEngine)
+    var teamScore: Int = 0
+    var opponentScore: Int = 0
+
     // Cached component nodes for animation
     var wheelNodes: [SCNNode] = []
     var mechanismNode: SCNNode?   // elevator_stage or pivot_arm
@@ -64,10 +68,23 @@ class RobotAgent {
         let timeRemaining = MatchTiming.totalDuration - simTime
         let period = currentPeriod(simTime)
 
+        // --- Score-aware policy adjustment ---
+        let scoreDiff = teamScore - opponentScore
+        var adjustedPolicy = policy
+        if scoreDiff < -10 {
+            // Losing badly: boost scoring, reduce endgame weight (need to catch up)
+            adjustedPolicy.scoringWeight = min(1.0, policy.scoringWeight + 0.2)
+            adjustedPolicy.endgameWeight = max(0.05, policy.endgameWeight - 0.1)
+        } else if scoreDiff > 15 {
+            // Winning big: can afford more defense, earlier endgame
+            adjustedPolicy.defenseWeight = min(1.0, policy.defenseWeight + 0.15)
+            adjustedPolicy.endgameWeight = min(1.0, policy.endgameWeight + 0.1)
+        }
+
         // --- Endgame urgency ---
         let endgameUrgency = max(0, 1.0 - timeRemaining / 25.0)
         if (period == .endgame || endgameUrgency > 0.7) && !isParkedEndgame {
-            let endgameUtil = policy.endgameWeight + endgameUrgency * 1.5
+            let endgameUtil = adjustedPolicy.endgameWeight + endgameUrgency * 1.5
             if endgameUtil > 0.8 || timeRemaining < 10 {
                 let barge = config.alliance == .red ? FieldLayout.redBarge : FieldLayout.blueBarge
                 targetPosition = barge
@@ -78,8 +95,8 @@ class RobotAgent {
 
         // --- Defense utility (defenders prefer blocking) ---
         if config.role == .defender {
-            let defUtil = policy.defenseWeight * 1.5
-            let scoreUtil = policy.scoringWeight
+            let defUtil = adjustedPolicy.defenseWeight * 1.5
+            let scoreUtil = adjustedPolicy.scoringWeight
 
             if defUtil > scoreUtil {
                 // Smart targeting: prioritize opponents carrying pieces or high scorers
@@ -107,7 +124,7 @@ class RobotAgent {
 
         // --- Scoring: pick up or deliver ---
         if hasPiece {
-            let best = chooseBestScoringTarget(policy: policy, allAgents: allAgents, rng: &rng)
+            let best = chooseBestScoringTarget(policy: adjustedPolicy, allAgents: allAgents, rng: &rng)
             targetPosition = best.position
             currentTargetLevel = best.level
             state = .driving
@@ -122,6 +139,8 @@ class RobotAgent {
     private func defenderPriority(_ opp: RobotAgent) -> Double {
         var score = 0.0
         if opp.hasPiece { score += 10.0 }
+        if opp.state == .scoring { score += 5.0 }  // About to score — high priority
+        if opp.state == .driving && opp.hasPiece { score += 3.0 }  // Heading to score
         if opp.config.role == .scorer { score += 3.0 }
         if opp.config.role == .cycler { score += 2.0 }
         score += Double(opp.piecesScored) * 0.5
@@ -249,11 +268,34 @@ class RobotAgent {
     func updateMovement(dt: Float) {
         guard let target = targetPosition else { return }
 
-        let dx = target.x - position.x
-        let dz = target.y - position.y
+        // --- Obstacle avoidance: center skybridge ---
+        // If the direct path crosses the center structure, steer around it
+        let obstacleHalf: Float = FieldSpec.bargeTrussDepth / 2 + 0.15
+        let obstacleSpanHalf: Float = FieldSpec.bargeTrussSpan / 2 + 0.1
+        let effectiveTarget: SIMD2<Float>
+        let crossingCenter = (position.x > obstacleHalf && target.x < -obstacleHalf) ||
+                             (position.x < -obstacleHalf && target.x > obstacleHalf)
+        if crossingCenter && abs(position.y) < obstacleSpanHalf {
+            // Route to the nearest edge of the obstacle, then continue to target
+            let detourZ: Float = position.y >= 0
+                ? obstacleSpanHalf + 0.2
+                : -(obstacleSpanHalf + 0.2)
+            effectiveTarget = SIMD2<Float>(position.x > 0 ? obstacleHalf + 0.1 : -(obstacleHalf + 0.1), detourZ)
+        } else if abs(position.x) < obstacleHalf && abs(position.y) < obstacleSpanHalf {
+            // Currently inside obstacle zone — push out to nearest side
+            let pushX: Float = position.x >= 0 ? obstacleHalf + 0.1 : -(obstacleHalf + 0.1)
+            effectiveTarget = SIMD2<Float>(pushX, position.y)
+        } else {
+            effectiveTarget = target
+        }
+
+        let dx = effectiveTarget.x - position.x
+        let dz = effectiveTarget.y - position.y
         let dist = sqrt(dx * dx + dz * dz)
 
         if dist < 0.15 {
+            // Check if this was a detour — if we reached the detour point, the actual
+            // target is still the original. Let decideGoal re-evaluate.
             speed = 0
             return
         }
@@ -275,8 +317,14 @@ class RobotAgent {
         position.x += sin(heading) * speed * dt
         position.y += cos(heading) * speed * dt
 
+        // Clamp to field bounds
         position.x = max(-FieldLayout.halfWidth + 0.15, min(FieldLayout.halfWidth - 0.15, position.x))
         position.y = max(-FieldLayout.halfLength + 0.15, min(FieldLayout.halfLength - 0.15, position.y))
+
+        // Soft repulsion from center obstacle
+        if abs(position.x) < obstacleHalf && abs(position.y) < obstacleSpanHalf {
+            position.x += (position.x >= 0 ? 0.02 : -0.02)
+        }
     }
 
     var hasReachedTarget: Bool {
@@ -350,6 +398,8 @@ final class MatchEngine: ObservableObject {
     @Published var robotStates: [Int: RobotState] = [:]
     @Published var currentTip: CoachingTip?
     @Published var isSlowMo: Bool = false
+    @Published var activeCallouts: Set<Callout> = []  // Currently active callouts
+    @Published var calloutCooldown: Double = 0        // Seconds until next callout available
 
     let configs: [RobotConfig]
     let playerAutoPlan: AutoPlan
@@ -360,7 +410,7 @@ final class MatchEngine: ObservableObject {
     var rng: SeededRNG
     private var updateTimer: Timer?
     private var calloutsUsed: [Callout] = []
-    private var calloutsRemaining: Int = 3
+    private var calloutEvents: [CalloutEvent] = []
     private var slowMoTimer: Double = 0
     private var slowMoUsed: Bool = false
     private var lastUpdateTime: Date?
@@ -418,14 +468,100 @@ final class MatchEngine: ObservableObject {
 
     // MARK: - Callouts
 
-    var canUseCallout: Bool { calloutsRemaining > 0 && isRunning && !isFinished }
+    /// Per-callout availability: must be correct period, off cooldown, and not already active.
+    func canUseCallout(_ callout: Callout) -> Bool {
+        guard isRunning, !isFinished, calloutCooldown <= 0 else { return false }
+        guard callout.isAvailable(during: period) else { return false }
+        return !activeCallouts.contains(callout)
+    }
+
+    /// Legacy computed property for basic "any callout available" check.
+    var canUseAnyCallout: Bool {
+        guard isRunning, !isFinished, calloutCooldown <= 0 else { return false }
+        return Callout.allCases.contains { canUseCallout($0) }
+    }
 
     func useCallout(_ callout: Callout) {
-        guard canUseCallout else { return }
-        calloutsRemaining -= 1
+        guard canUseCallout(callout) else { return }
         calloutsUsed.append(callout)
+        activeCallouts.insert(callout)
+        calloutCooldown = 5.0  // 5-second cooldown between callouts
+
+        // Record event for decision map
+        calloutEvents.append(CalloutEvent(
+            callout: callout,
+            matchTime: simTime,
+            redScoreAtTime: redScore,
+            blueScoreAtTime: blueScore
+        ))
+
+        // Apply strategy policy change
         redPolicy = redPolicy.applying(callout: callout)
         strategyMode = redPolicy.dominantMode
+
+        // Immediately apply behavioral changes to agents
+        applyCalloutEffects(callout)
+    }
+
+    /// Force agents to naturally react to the callout.
+    private func applyCalloutEffects(_ callout: Callout) {
+        let redAgents = agents.filter { $0.config.alliance == .red && !$0.isParkedEndgame }
+
+        switch callout {
+        case .prioritizeReef:
+            // All red agents re-evaluate goals → prioritize scoring
+            for agent in redAgents where agent.state == .idle || agent.state == .driving || agent.state == .defending {
+                agent.state = .idle  // Force re-goal with new policy
+            }
+
+        case .switchDefense:
+            // Find best candidate to switch to defense (non-defender that isn't carrying a piece)
+            if let candidate = redAgents.first(where: {
+                $0.config.role != .defender && !$0.hasPiece && $0.config.id != 0
+                && ($0.state == .idle || $0.state == .driving)
+            }) {
+                // Immediately set to defending
+                let opponents = agents.filter { $0.config.alliance == .blue && !$0.isParkedEndgame }
+                if let target = opponents.max(by: { $0.piecesScored < $1.piecesScored }) {
+                    let theirReef = FieldSpec.blueReefCenter
+                    candidate.targetPosition = SIMD2<Float>(
+                        target.position.x * 0.6 + theirReef.x * 0.4,
+                        target.position.y * 0.6 + theirReef.y * 0.4
+                    )
+                    candidate.state = .defending
+                }
+            }
+
+        case .endgameEarly:
+            // All red agents head to endgame positions immediately
+            for agent in redAgents where !agent.isParkedEndgame && agent.state != .climbing {
+                agent.targetPosition = FieldLayout.redBarge
+                agent.state = .headingEndgame
+            }
+
+        case .focusHigh:
+            // Scorers re-evaluate to pick higher targets
+            for agent in redAgents where (agent.state == .idle || agent.state == .driving) {
+                agent.state = .idle  // Force re-goal with preferHighLevel
+            }
+
+        case .spreadOut:
+            // Reset lastFaceUsed so all agents pick new faces
+            for agent in redAgents {
+                agent.lastFaceUsed = -1
+                if agent.state == .idle || agent.state == .driving {
+                    agent.state = .idle  // Force re-goal
+                }
+            }
+
+        case .allOutAttack:
+            // Defenders switch to scoring, everyone re-evaluates
+            for agent in redAgents {
+                if agent.state == .defending {
+                    agent.state = .idle
+                }
+            }
+        }
     }
 
     // MARK: - Slow-Mo
@@ -474,7 +610,23 @@ final class MatchEngine: ObservableObject {
             if slowMoTimer <= 0 { deactivateSlowMo() }
         }
 
+        // Decrement callout cooldown
+        if calloutCooldown > 0 {
+            calloutCooldown = max(0, calloutCooldown - simDt)
+        }
+
         let dt = Float(simDt)
+
+        // Update score awareness for all agents
+        for agent in agents {
+            if agent.config.alliance == .red {
+                agent.teamScore = redScore
+                agent.opponentScore = blueScore
+            } else {
+                agent.teamScore = blueScore
+                agent.opponentScore = redScore
+            }
+        }
 
         for agent in agents {
             updateAgent(agent, dt: dt, simDt: simDt)
@@ -1108,7 +1260,7 @@ final class MatchEngine: ObservableObject {
                 let unique = Set(builds).count
                 return CoachingTip(
                     headline: "Build Variety",
-                    detail: "There are \(unique) different build combos on the field. In competitions, each team's robot is unique — some teams prioritize speed, others reliability or reach.",
+                    detail: "There are \(unique) different build combos on the field. In real FRC, each team's robot is unique — some teams prioritize speed, others reliability or reach.",
                     highlightRobotId: nil
                 )
             },
@@ -1154,6 +1306,7 @@ final class MatchEngine: ObservableObject {
             redBreakdown: redBreakdown,
             blueBreakdown: blueBreakdown,
             calloutsUsed: calloutsUsed,
+            calloutEvents: calloutEvents,
             playerRobotScored: playerAgent?.piecesScored ?? 0,
             playerRobotCycled: playerAgent?.piecesCycled ?? 0,
             didPlayerStall: playerAgent?.didStall ?? false,

@@ -1,8 +1,8 @@
 import Foundation
 
 // MARK: - Field Spec
-// Numerical coordinate specification for the competition robotics field.
-// Inspired by real competitive robotics field designs.
+// Numerical coordinate specification for the competition field.
+// Inspired by FRC 2025 Reefscape — not a direct copy.
 //
 // Coordinate system:
 //   Origin = field center

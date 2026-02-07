@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Rookie Rush: Level 1 — An interactive robotics strategy onboarding playground.
+/// Rookie Rush: Level 1 — An interactive FRC-inspired onboarding playground.
 /// Teaches new robotics students the core loop: Strategy → Build → Run.
 @main
 struct RookieRushApp: App {

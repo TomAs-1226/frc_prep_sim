@@ -39,6 +39,9 @@ struct ResultsView: View {
                     choicesSection
                         .padding(.horizontal, 20)
 
+                    decisionMapSection
+                        .padding(.horizontal, 20)
+
                     coachingCard
                         .padding(.horizontal, 20)
 
@@ -323,6 +326,189 @@ struct ResultsView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .background(Capsule().fill(color.opacity(0.12)))
+    }
+
+    // MARK: - Decision Map
+
+    @ViewBuilder
+    private var decisionMapSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("DECISION MAP")
+                .font(.caption.bold())
+                .foregroundStyle(.white.opacity(0.4))
+                .tracking(1)
+
+            // Node flow: Strategy → Role → Build → Auto → Match
+            VStack(spacing: 0) {
+                // Strategy node
+                decisionNode(
+                    icon: result.playerStrategy.icon,
+                    label: result.playerStrategy.rawValue,
+                    detail: "Alliance strategy",
+                    color: result.playerStrategy.color,
+                    isStart: true
+                )
+                nodeConnector()
+
+                // Role node
+                decisionNode(
+                    icon: result.playerRole.icon,
+                    label: result.playerRole.rawValue,
+                    detail: "Your role",
+                    color: .cyan,
+                    isStart: false
+                )
+                nodeConnector()
+
+                // Build node
+                decisionNode(
+                    icon: "wrench.and.screwdriver.fill",
+                    label: "\(result.playerBuild.drivetrain.shortLabel) / \(result.playerBuild.mechanism.shortLabel) / \(result.playerBuild.intake.shortLabel)",
+                    detail: "Robot build (max L\(result.playerBuild.mechanism.maxLevel))",
+                    color: .orange,
+                    isStart: false
+                )
+                nodeConnector()
+
+                // Auto node
+                decisionNode(
+                    icon: result.playerAuto.icon,
+                    label: "\(result.playerAuto.rawValue) Auto",
+                    detail: result.didPlayerStall ? "Stalled!" : "\(result.playerAuto.piecesAttempted) pieces attempted",
+                    color: result.didPlayerStall ? .red : result.playerAuto.color,
+                    isStart: false
+                )
+
+                // Callout events
+                if !result.calloutEvents.isEmpty {
+                    nodeConnector()
+                    VStack(spacing: 4) {
+                        ForEach(Array(result.calloutEvents.enumerated()), id: \.offset) { _, event in
+                            let timeStr = formatTime(event.matchTime)
+                            HStack(spacing: 8) {
+                                Image(systemName: event.callout.icon)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(event.callout.color)
+                                    .frame(width: 20)
+
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(event.callout.rawValue)
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(.white.opacity(0.8))
+                                    Text("@\(timeStr) — Score: \(event.redScoreAtTime)-\(event.blueScoreAtTime)")
+                                        .font(.system(size: 8))
+                                        .foregroundStyle(.white.opacity(0.4))
+                                }
+
+                                Spacer()
+
+                                Circle()
+                                    .fill(event.callout.color.opacity(0.3))
+                                    .frame(width: 8, height: 8)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(event.callout.color.opacity(0.06))
+                            )
+                        }
+                    }
+                    .padding(.leading, 24)
+                }
+
+                nodeConnector()
+
+                // Outcome node
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(result.playerWon ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: result.playerWon ? "trophy.fill" : (result.margin == 0 ? "equal.circle.fill" : "xmark.circle.fill"))
+                            .font(.body)
+                            .foregroundStyle(result.playerWon ? .yellow : (result.margin == 0 ? .orange : .red))
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(result.playerWon ? "VICTORY" : (result.margin == 0 ? "TIE" : "DEFEAT"))
+                            .font(.system(size: 11, weight: .black))
+                            .foregroundStyle(result.playerWon ? .green : (result.margin == 0 ? .orange : .red))
+                        Text("\(result.redScore) - \(result.blueScore) (\(result.margin)pt \(result.playerWon ? "lead" : "gap"))")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                    Spacer()
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.white.opacity(0.04))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(
+                                    (result.playerWon ? Color.green : (result.margin == 0 ? Color.orange : Color.red)).opacity(0.3),
+                                    lineWidth: 1
+                                )
+                        )
+                )
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.white.opacity(0.03))
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Decision map showing your choices and match outcome")
+    }
+
+    @ViewBuilder
+    private func decisionNode(icon: String, label: String, detail: String, color: Color, isStart: Bool) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.15))
+                    .frame(width: 30, height: 30)
+                Image(systemName: icon)
+                    .font(.caption)
+                    .foregroundStyle(color)
+            }
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.85))
+                Text(detail)
+                    .font(.system(size: 8))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(color.opacity(0.04))
+        )
+    }
+
+    @ViewBuilder
+    private func nodeConnector() -> some View {
+        HStack {
+            Rectangle()
+                .fill(Color.white.opacity(0.15))
+                .frame(width: 2, height: 16)
+                .padding(.leading, 24)
+            Spacer()
+        }
+    }
+
+    private func formatTime(_ simTime: Double) -> String {
+        let remaining = max(0, MatchTiming.totalDuration - simTime)
+        let m = Int(remaining) / 60
+        let s = Int(remaining) % 60
+        return String(format: "%d:%02d", m, s)
     }
 
     // MARK: - Coaching Card

@@ -360,6 +360,25 @@ enum Callout: String, CaseIterable, Identifiable {
         case .allOutAttack:   return "Max aggression"
         }
     }
+
+    /// Period-based availability — some callouts are restricted.
+    func isAvailable(during period: MatchPeriod) -> Bool {
+        switch self {
+        case .endgameEarly:
+            return period == .teleop || period == .endgame
+        case .prioritizeReef, .switchDefense, .focusHigh, .spreadOut, .allOutAttack:
+            return period == .teleop || period == .endgame
+        }
+    }
+}
+
+// MARK: - Callout Event (for decision map)
+
+struct CalloutEvent: Equatable {
+    let callout: Callout
+    let matchTime: Double
+    let redScoreAtTime: Int
+    let blueScoreAtTime: Int
 }
 
 // MARK: - Match Period
@@ -482,6 +501,7 @@ struct MatchResult {
     let redBreakdown: ScoreBreakdown
     let blueBreakdown: ScoreBreakdown
     let calloutsUsed: [Callout]
+    let calloutEvents: [CalloutEvent]
     let playerRobotScored: Int
     let playerRobotCycled: Int
     let didPlayerStall: Bool

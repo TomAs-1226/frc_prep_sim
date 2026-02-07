@@ -34,7 +34,7 @@ struct IntroView: View {
                         .font(.system(size: 36, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
 
-                    Text("Robotics Strategy Lab")
+                    Text("Inspired by FRC Reefscape")
                         .font(.subheadline.bold())
                         .foregroundStyle(.orange.opacity(0.9))
                         .tracking(1)

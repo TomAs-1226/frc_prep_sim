@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Onboarding View
 
-/// First-launch onboarding that introduces competitive robotics concepts and the Match Coach app.
+/// First-launch onboarding that introduces FRC concepts and the Match Coach app.
 struct OnboardingView: View {
     @Binding var hasCompletedOnboarding: Bool
     @State private var currentPage = 0
@@ -10,9 +10,9 @@ struct OnboardingView: View {
     private let pages: [(title: String, subtitle: String, icon: String, description: String)] = [
         (
             "Welcome to Match Coach",
-            "Robotics Strategy Lab",
+            "Inspired by FRC Reefscape",
             "gamecontroller.fill",
-            "Competitive robotics is where students design, build, and program robots to compete in exciting challenges. This app teaches you how match strategy works through interactive 6-robot simulations."
+            "FRC (FIRST Robotics Competition) is where students design, build, and program robots to compete in exciting challenges. This app teaches you how FRC match strategy works through interactive 6-robot simulations inspired by the Reefscape game."
         ),
         (
             "You're the Strategist",
@@ -24,7 +24,7 @@ struct OnboardingView: View {
             "6 Robots, 1 Field",
             "Real-Time Simulation",
             "play.rectangle.fill",
-            "Watch all 6 robots compete on a competition-style field. Use slow-mo coaching to learn what's happening, and trigger strategic callouts to adjust mid-match — just like a real drive coach."
+            "Watch all 6 robots compete on a Reefscape-inspired field. Use slow-mo coaching to learn what's happening, and trigger strategic callouts to adjust mid-match — just like a real FRC drive coach."
         ),
         (
             "AI-Powered Coaching",

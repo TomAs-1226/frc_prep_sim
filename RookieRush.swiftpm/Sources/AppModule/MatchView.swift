@@ -228,30 +228,50 @@ struct MatchView: View {
 
             Spacer()
 
-            // Callout buttons (6 options, scrollable)
+            // Callout buttons (6 options, scrollable, per-callout availability)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 5) {
                     ForEach(Callout.allCases) { callout in
+                        let available = engine.canUseCallout(callout)
+                        let isActive = engine.activeCallouts.contains(callout)
                         Button(action: { engine.useCallout(callout) }) {
                             VStack(spacing: 1) {
                                 Image(systemName: callout.icon)
                                     .font(.system(size: 10))
                                 Text(callout.rawValue)
                                     .font(.system(size: 7, weight: .bold))
-                                Text(callout.subtitle)
-                                    .font(.system(size: 6))
-                                    .foregroundStyle(.white.opacity(0.35))
+                                Text(isActive ? "ACTIVE" : callout.subtitle)
+                                    .font(.system(size: 6, weight: isActive ? .bold : .regular))
+                                    .foregroundStyle(isActive ? .green.opacity(0.9) : .white.opacity(0.35))
                             }
-                            .foregroundStyle(engine.canUseCallout ? callout.color : .white.opacity(0.3))
+                            .foregroundStyle(isActive ? .green : (available ? callout.color : .white.opacity(0.3)))
                             .frame(minWidth: 50)
                             .padding(.vertical, 6)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.white.opacity(engine.canUseCallout ? 0.08 : 0.03))
+                                    .fill(isActive ? Color.green.opacity(0.12) :
+                                            Color.white.opacity(available ? 0.08 : 0.03))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .strokeBorder(isActive ? Color.green.opacity(0.5) : Color.clear, lineWidth: 1)
+                                    )
                             )
                         }
-                        .disabled(!engine.canUseCallout)
-                        .accessibilityLabel("Callout: \(callout.rawValue) — \(callout.subtitle)")
+                        .disabled(!available)
+                        .accessibilityLabel("Callout: \(callout.rawValue) — \(isActive ? "Active" : callout.subtitle)")
+                    }
+
+                    // Cooldown indicator
+                    if engine.calloutCooldown > 0 {
+                        VStack(spacing: 2) {
+                            Image(systemName: "clock.fill")
+                                .font(.system(size: 9))
+                            Text(String(format: "%.0fs", engine.calloutCooldown))
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        }
+                        .foregroundStyle(.orange.opacity(0.6))
+                        .frame(minWidth: 36)
+                        .padding(.vertical, 6)
                     }
                 }
             }

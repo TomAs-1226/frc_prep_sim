@@ -410,7 +410,7 @@ struct PreMatchView: View {
                 }
             }
 
-            tipBanner(text: "Riskier autos attempt more game pieces but have a higher stall chance. In competition, consistency often wins matches!")
+            tipBanner(text: "Riskier autos attempt more game pieces but have a higher stall chance. In FRC, consistency often wins matches!")
         }
     }
 
