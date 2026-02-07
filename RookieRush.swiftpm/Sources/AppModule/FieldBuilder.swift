@@ -1,7 +1,7 @@
 import SceneKit
 
 // MARK: - Field Builder
-// Constructs an accurate REEFSCAPE field from FieldSpec coordinates.
+// Constructs a competition-style robotics field from FieldSpec coordinates.
 // All geometry is procedural — no imported assets.
 // Coherent minimalist art style: dark surface, clean shapes, alliance colors.
 
@@ -401,7 +401,7 @@ enum FieldBuilder {
         root.addChildNode(zoneNode)
 
         // Label
-        addText(alliance == .red ? "RED REEF" : "BLUE REEF",
+        addText(alliance == .red ? "RED TOWER" : "BLUE TOWER",
                 at: SCNVector3(center.x, 0.02, center.y + FieldSpec.reefApothem + 0.25),
                 color: alliance == .red ? .red : UIColor(red: 0.3, green: 0.4, blue: 1.0, alpha: 1),
                 size: 0.06, to: root)
@@ -495,7 +495,7 @@ enum FieldBuilder {
             root.addChildNode(zn)
         }
 
-        addText("BARGE", at: SCNVector3(0, 0.02, span / 2 + 0.15),
+        addText("SKYBRIDGE", at: SCNVector3(0, 0.02, span / 2 + 0.15),
                 color: UIColor.white.withAlphaComponent(0.4), size: 0.08, to: root)
     }
 
@@ -563,7 +563,7 @@ enum FieldBuilder {
         pn.position = SCNVector3(pos.x, 0.10, wallZ)
         root.addChildNode(pn)
 
-        addText("PROCESSOR", at: SCNVector3(pos.x, 0.015, pos.y + (onFarWall ? -0.15 : 0.15)),
+        addText("RECYCLER", at: SCNVector3(pos.x, 0.015, pos.y + (onFarWall ? -0.15 : 0.15)),
                 color: alliance.uiColor.withAlphaComponent(0.5), size: 0.04, to: root)
     }
 
@@ -660,6 +660,14 @@ enum FieldBuilder {
         SCNNode(geometry: sharedAlgaeGeo)
     }
 
+    /// Spawn a ring (coral) projectile node for the scoring physics system.
+    static func makeRingProjectile() -> SCNNode {
+        let node = SCNNode(geometry: sharedCoralGeo)
+        node.eulerAngles.x = Float.pi / 2  // Lie on side for flight
+        node.name = "ring_projectile"
+        return node
+    }
+
     // MARK: - Text Helper
 
     private static func addText(_ text: String, at pos: SCNVector3, color: UIColor,
@@ -753,8 +761,11 @@ enum RobotBuilder {
     // MARK: - Drivetrain Visuals
 
     private static func addSwerveWheels(to root: SCNNode, cW: CGFloat, cL: CGFloat) {
-        for (ox, oz) in [(-cW/2 + 0.03, -cL/2 + 0.04), (cW/2 - 0.03, -cL/2 + 0.04),
-                          (-cW/2 + 0.03, cL/2 - 0.04), (cW/2 - 0.03, cL/2 - 0.04)] {
+        let positions: [(CGFloat, CGFloat)] = [
+            (-cW/2 + 0.03, -cL/2 + 0.04), (cW/2 - 0.03, -cL/2 + 0.04),
+            (-cW/2 + 0.03, cL/2 - 0.04), (cW/2 - 0.03, cL/2 - 0.04)
+        ]
+        for (i, (ox, oz)) in positions.enumerated() {
             let hn = SCNNode(geometry: swerveHousingGeo)
             hn.position = SCNVector3(Float(ox), 0.01, Float(oz))
             root.addChildNode(hn)
@@ -762,17 +773,21 @@ enum RobotBuilder {
             let wn = SCNNode(geometry: swerveWheelGeo)
             wn.eulerAngles.z = .pi / 2
             wn.position = SCNVector3(Float(ox), 0.035, Float(oz))
+            wn.name = "wheel_\(i)"
             root.addChildNode(wn)
         }
     }
 
     private static func addTankWheels(to root: SCNNode, cW: CGFloat, cL: CGFloat) {
+        var idx = 0
         for side: CGFloat in [-1, 1] {
             for zOff: CGFloat in [-cL/2 + 0.05, 0, cL/2 - 0.05] {
                 let wn = SCNNode(geometry: tankWheelGeo)
                 wn.eulerAngles.z = .pi / 2
                 wn.position = SCNVector3(Float(side * (cW/2 - 0.01)), 0.04, Float(zOff))
+                wn.name = "wheel_\(idx)"
                 root.addChildNode(wn)
+                idx += 1
             }
         }
     }
@@ -846,6 +861,7 @@ enum RobotBuilder {
         let rn = SCNNode(geometry: roller)
         rn.eulerAngles.z = .pi / 2
         rn.position = SCNVector3(0, baseY + 0.028, cL / 2 + 0.02)
+        rn.name = "intake_roller"
         root.addChildNode(rn)
 
         let guard_ = SCNBox(width: 0.24, height: 0.04, length: 0.06, chamferRadius: 0)

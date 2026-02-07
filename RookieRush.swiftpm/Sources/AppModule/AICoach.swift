@@ -74,9 +74,9 @@ final class AICoach: ObservableObject {
     private func generateAIFeedback(for result: MatchResult) async throws -> String {
         let session = LanguageModelSession(
             instructions: """
-            You are a friendly, encouraging FRC (FIRST Robotics Competition) mentor \
+            You are a friendly, encouraging competitive robotics mentor \
             coaching a brand-new rookie student. They just ran a 6-robot match simulation \
-            in an educational app called "Match Coach: Reefscape Strategy Lab." \
+            in an educational app called "Match Coach: Robotics Strategy Lab." \
             \
             Give a 3-4 sentence response that: \
             1. Comments on their strategy choices and the match outcome. \
@@ -143,11 +143,11 @@ final class AICoach: ObservableObject {
         } else if result.playerWon {
             lines.append("Nice win! \(result.redScore)-\(result.blueScore) — a \(result.margin)-point margin shows your strategy worked, though there's room to widen the gap.")
         } else if result.margin == 0 {
-            lines.append("A tie at \(result.redScore)-\(result.blueScore)! In FRC, ties are rare and exciting. A small adjustment to your strategy could tip the balance next time.")
+            lines.append("A tie at \(result.redScore)-\(result.blueScore)! Ties are rare and exciting. A small adjustment to your strategy could tip the balance next time.")
         } else if result.margin < 10 {
             lines.append("Close match! \(result.redScore)-\(result.blueScore) — just \(result.margin) points separated the alliances. Small strategic changes can flip a close loss into a win.")
         } else {
-            lines.append("Tough loss at \(result.redScore)-\(result.blueScore). Don't worry — even top FRC teams lose matches. The key is analyzing what happened and adapting.")
+            lines.append("Tough loss at \(result.redScore)-\(result.blueScore). Don't worry — even top teams lose matches. The key is analyzing what happened and adapting.")
         }
 
         // Strategy analysis
@@ -162,7 +162,7 @@ final class AICoach: ObservableObject {
             lines.append("The balanced strategy is versatile — you had both scoring and some defensive coverage. To optimize, try tilting toward aggressive if opponents are weak scorers, or defensive if they're strong.")
         case .defensive:
             if result.playerWon {
-                lines.append("Defense won this match! Slowing opponents while your cyclers scored efficiently is a classic FRC strategy. Great call.")
+                lines.append("Defense won this match! Slowing opponents while your cyclers scored efficiently is a classic competitive strategy. Great call.")
             } else {
                 lines.append("Your defense slowed opponents, but your scorers couldn't generate enough points. Defense only works when your alliance still cycles well — consider upgrading your scorer's role.")
             }
@@ -188,7 +188,7 @@ final class AICoach: ObservableObject {
 
         // Stall feedback
         if result.didPlayerStall {
-            lines.append("Your robot stalled during the match. In FRC, reliability beats everything. Consider a safer auto routine — consistent points beat risky zeros.")
+            lines.append("Your robot stalled during the match. In competition, reliability beats everything. Consider a safer auto routine — consistent points beat risky zeros.")
         }
 
         // Auto feedback
@@ -198,7 +198,7 @@ final class AICoach: ObservableObject {
                 lines.append("Your safe auto delivered consistent points. Once you're comfortable, try moderate to push for more auto scoring.")
             }
         case .moderate:
-            lines.append("The moderate auto is a solid middle ground. In real FRC, this is what many competitive teams run — enough points without the stall risk.")
+            lines.append("The moderate auto is a solid middle ground. Many competitive teams run this approach — enough points without the stall risk.")
         case .risky:
             if result.didPlayerStall {
                 lines.append("The risky auto caused a stall. In competition, failed autos can cost matches. Try moderate next time — the reliability is worth more than the extra piece attempt.")
@@ -209,9 +209,9 @@ final class AICoach: ObservableObject {
 
         // Callout feedback
         if result.calloutsUsed.isEmpty {
-            lines.append("Tip: Try using callouts during the match! They let you shift your alliance's strategy mid-game — a key skill for real FRC drive coaches.")
+            lines.append("Tip: Try using callouts during the match! They let you shift your alliance's strategy mid-game — a key skill for competitive drive coaches.")
         } else {
-            lines.append("Good use of callouts! You used \(result.calloutsUsed.count) strategic adjustments. In real FRC, drive coaches constantly adapt — you're thinking like one.")
+            lines.append("Good use of callouts! You used \(result.calloutsUsed.count) strategic adjustments. Great drive coaches constantly adapt — you're thinking like one.")
         }
 
         return lines.joined(separator: "\n\n")

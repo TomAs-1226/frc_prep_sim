@@ -51,9 +51,9 @@ enum RobotRole: String, CaseIterable, Identifiable {
     var description: String {
         switch self {
         case .scorer:
-            return "Places coral on higher reef levels. Slower but scores big per piece."
+            return "Places game pieces on higher tower levels. Slower but scores big per piece."
         case .cycler:
-            return "Rapid coral delivery focusing on L1-L2. Fast cycles, high volume."
+            return "Rapid piece delivery focusing on L1-L2. Fast cycles, high volume."
         case .defender:
             return "Disrupts opponents by blocking lanes. Tough and fast, scores when open."
         }
@@ -133,11 +133,11 @@ enum AutoPlan: String, CaseIterable, Identifiable {
     var description: String {
         switch self {
         case .safe:
-            return "Cross auto line + score 1 coral. Reliable guaranteed points."
+            return "Cross launch line + score 1 game piece. Reliable guaranteed points."
         case .moderate:
-            return "Score 2 coral during auto. Needs decent speed and accuracy."
+            return "Score 2 pieces during auto. Needs decent speed and accuracy."
         case .risky:
-            return "Attempt 3 coral in auto. High ceiling but real stall chance."
+            return "Attempt 3 pieces in auto. High ceiling but real stall chance."
         }
     }
 
@@ -282,7 +282,7 @@ enum IntakeType: String, CaseIterable, Identifiable {
     var cons: String {
         switch self {
         case .claw:   return "Slow pickup (1.0s), loses time each cycle"
-        case .roller: return "Less reliable scoring (-5%), can drop coral"
+        case .roller: return "Less reliable scoring (-5%), can drop game pieces"
         }
     }
     var color: Color {
@@ -322,7 +322,7 @@ struct StrategyPolicy {
 // MARK: - Callout (6 strategic options)
 
 enum Callout: String, CaseIterable, Identifiable {
-    case prioritizeReef = "Push Reef"
+    case prioritizeReef = "Push Tower"
     case switchDefense  = "Play Defense"
     case endgameEarly   = "Endgame Now"
     case focusHigh      = "Focus High"
@@ -688,13 +688,27 @@ enum RobotFactory {
         return RobotBuild(drivetrain: dt, mechanism: mech, intake: intake)
     }
 
-    private static func superstructureFor(_ build: RobotBuild, role: RobotRole) -> SuperstructureType {
+    static func superstructureFor(_ build: RobotBuild, role: RobotRole) -> SuperstructureType {
         if role == .defender && build.mechanism == .simple { return .wedge }
         switch build.mechanism {
         case .elevator: return .elevator
         case .arm:      return .arm
         case .simple:   return .intake
         }
+    }
+
+    /// Build a preview config for the 3D robot preview on the build page.
+    static func previewConfig(build: RobotBuild, role: RobotRole = .scorer) -> RobotConfig {
+        RobotConfig(
+            id: 99,
+            alliance: .red,
+            role: role,
+            stats: statsForBuild(build, role: role, boost: false),
+            superstructure: superstructureFor(build, role: role),
+            build: build,
+            teamNumber: "0000",
+            startPosition: SIMD2(0, 0)
+        )
     }
 
     private static func complementRole1(for strategy: AllianceStrategy, playerRole: RobotRole) -> RobotRole {

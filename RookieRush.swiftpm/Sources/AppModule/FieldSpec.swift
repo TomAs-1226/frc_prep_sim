@@ -1,18 +1,18 @@
 import Foundation
 
 // MARK: - Field Spec
-// Numerical coordinate specification for the FRC 2025 REEFSCAPE field.
+// Numerical coordinate specification for the competition robotics field.
+// Inspired by real competitive robotics field designs.
 //
 // Coordinate system:
 //   Origin = field center
-//   +X = toward red alliance wall (along 54ft length)
-//   +Z = toward "far" long wall (along 27ft width)
+//   +X = toward red alliance wall (along length)
+//   +Z = toward "far" long wall (along width)
 //   +Y = up
 //
 // Scale: 1 scene unit = 2 real-world meters (both horizontal and vertical)
 //
-// Source: WPILib 2025-reefscape-welded.json AprilTag data + official game manual.
-// To update with exact official coordinates, replace the numeric values below.
+// Procedural field layout. Replace numeric values to customize.
 // The architecture is designed for drop-in coord replacement.
 
 enum FieldSpec {
@@ -36,15 +36,14 @@ enum FieldSpec {
     static let allianceWallHeight: Float = 0.15
     static let wallThickness: Float = 0.03
 
-    // MARK: - Reef Geometry
+    // MARK: - Scoring Tower Geometry
     //
-    // Each alliance has one hexagonal reef structure on their half.
-    // Real dimensions: face-to-face 1.66m, pipe height 1.83m
+    // Each alliance has one hexagonal scoring tower on their half.
     // 6 faces, each with 2 vertical pipes and branches at L2/L3/L4
     //
-    // Official AprilTag-derived reef centers:
-    //   Red reef:  WPILib (13.06, 4.03) → scene (2.14, 0.0)
-    //   Blue reef: WPILib ( 4.49, 4.03) → scene (-2.14, 0.0)
+    // Tower centers:
+    //   Red tower:  scene (2.14, 0.0)
+    //   Blue tower: scene (-2.14, 0.0)
 
     static let reefApothem: Float = 0.415     // half of face-to-face distance
     static let reefRadius: Float = 0.479      // center-to-vertex = apothem / cos(30°)
@@ -70,9 +69,9 @@ enum FieldSpec {
     static let redReefCenter = SIMD2<Float>(2.14, 0.0)
     static let blueReefCenter = SIMD2<Float>(-2.14, 0.0)
 
-    // MARK: - Barge (center divider structure)
+    // MARK: - Skybridge (center divider structure)
     //
-    // Truss spanning field width at center. Real: 8.89m wide × 1.12m deep × 2.57m tall
+    // Truss spanning field width at center.
 
     static let bargeCenter = SIMD2<Float>(0.0, 0.0)
     static let bargeTrussSpan: Float = 4.45  // spans width (8.89m → scene)
@@ -96,10 +95,9 @@ enum FieldSpec {
     static let bargeZoneHalfLength: Float = 0.93  // 1.86m each half
     static let bargeZoneDepth: Float = 0.585
 
-    // MARK: - Coral Stations (at 4 field corners)
+    // MARK: - Supply Stations (at 4 field corners)
     //
-    // Angled chutes where human players feed coral into the field.
-    // Real: 1.80m wide × 4.23m deep, chute at 55° angle
+    // Angled chutes where human players feed game pieces into the field.
 
     static let redCoralNear  = SIMD2<Float>(3.96, -1.68)
     static let redCoralFar   = SIMD2<Float>(3.96,  1.69)
@@ -109,10 +107,9 @@ enum FieldSpec {
     static let coralStationWidth: Float = 0.90
     static let coralStationDepth: Float = 1.20  // playable area near opening
 
-    // MARK: - Processors (on opposite long walls)
+    // MARK: - Recyclers (on opposite long walls)
     //
-    // Red processor on far wall (+Z), blue on near wall (-Z)
-    // Real: 1.10m wide × 2.29m deep
+    // Red recycler on far wall (+Z), blue on near wall (-Z)
 
     static let redProcessor  = SIMD2<Float>(1.39, 2.02)
     static let blueProcessor = SIMD2<Float>(-1.39, -2.01)
@@ -145,8 +142,8 @@ enum FieldSpec {
     static let coralLength: Float = 0.076   // 11.875in → 302mm → scene
     static let algaeRadius: Float = 0.103   // 16in diameter → scene
 
-    // MARK: - Algae on Reef
-    // 3 algae per reef on alternating faces (0, 2, 4).
+    // MARK: - Spheres on Tower
+    // 3 spheres per tower on alternating faces (0, 2, 4).
     // Seated between L3 and L4 branch heights on the outer face.
 
     static let algaeOnReefFaces: [Int] = [0, 2, 4]
@@ -164,9 +161,9 @@ enum FieldSpec {
     static let coralChuteAngle: Float = 0.96  // radians (~55°)
     static let coralChuteHeight: Float = 0.40 // scene units
 
-    // MARK: - AprilTag Specification
+    // MARK: - Vision Marker Specification
 
-    static let aprilTagSize: Float = 0.103  // 8.125in → 20.6cm → scene
+    static let aprilTagSize: Float = 0.103  // marker size in scene units
 
     struct AprilTag {
         let id: Int
@@ -177,35 +174,35 @@ enum FieldSpec {
 
     static let aprilTags: [AprilTag] = [
         // Red Coral Stations
-        AprilTag(id: 1,  position: SIMD3( 3.96, 0.745, -1.68), yaw: .pi,        element: "Red Coral Station"),
-        AprilTag(id: 2,  position: SIMD3( 3.96, 0.745,  1.69), yaw: .pi,        element: "Red Coral Station"),
+        AprilTag(id: 1,  position: SIMD3( 3.96, 0.745, -1.68), yaw: .pi,        element: "Red Supply Station"),
+        AprilTag(id: 2,  position: SIMD3( 3.96, 0.745,  1.69), yaw: .pi,        element: "Red Supply Station"),
         // Red Processor
-        AprilTag(id: 3,  position: SIMD3( 1.39, 0.65,   2.02), yaw: -.pi / 2,   element: "Red Processor"),
+        AprilTag(id: 3,  position: SIMD3( 1.39, 0.65,   2.02), yaw: -.pi / 2,   element: "Red Recycler"),
         // Red Barge
-        AprilTag(id: 4,  position: SIMD3( 0.25, 0.935,  1.06), yaw: 0,          element: "Red Barge"),
-        AprilTag(id: 5,  position: SIMD3( 0.25, 0.935, -1.06), yaw: 0,          element: "Red Barge"),
+        AprilTag(id: 4,  position: SIMD3( 0.25, 0.935,  1.06), yaw: 0,          element: "Red Skybridge"),
+        AprilTag(id: 5,  position: SIMD3( 0.25, 0.935, -1.06), yaw: 0,          element: "Red Skybridge"),
         // Red Reef Faces (6-11)
-        AprilTag(id: 6,  position: SIMD3( 2.35, 0.155, -0.36), yaw: -.pi / 3,   element: "Red Reef"),
-        AprilTag(id: 7,  position: SIMD3( 2.56, 0.155,  0.00), yaw: 0,          element: "Red Reef"),
-        AprilTag(id: 8,  position: SIMD3( 2.35, 0.155,  0.36), yaw: .pi / 3,    element: "Red Reef"),
-        AprilTag(id: 9,  position: SIMD3( 1.93, 0.155,  0.36), yaw: 2 * .pi / 3, element: "Red Reef"),
-        AprilTag(id: 10, position: SIMD3( 1.73, 0.155,  0.00), yaw: .pi,        element: "Red Reef"),
-        AprilTag(id: 11, position: SIMD3( 1.93, 0.155, -0.36), yaw: -2 * .pi / 3, element: "Red Reef"),
+        AprilTag(id: 6,  position: SIMD3( 2.35, 0.155, -0.36), yaw: -.pi / 3,   element: "Red Tower"),
+        AprilTag(id: 7,  position: SIMD3( 2.56, 0.155,  0.00), yaw: 0,          element: "Red Tower"),
+        AprilTag(id: 8,  position: SIMD3( 2.35, 0.155,  0.36), yaw: .pi / 3,    element: "Red Tower"),
+        AprilTag(id: 9,  position: SIMD3( 1.93, 0.155,  0.36), yaw: 2 * .pi / 3, element: "Red Tower"),
+        AprilTag(id: 10, position: SIMD3( 1.73, 0.155,  0.00), yaw: .pi,        element: "Red Tower"),
+        AprilTag(id: 11, position: SIMD3( 1.93, 0.155, -0.36), yaw: -2 * .pi / 3, element: "Red Tower"),
         // Blue Coral Stations
-        AprilTag(id: 12, position: SIMD3(-3.96, 0.745, -1.68), yaw: 0,          element: "Blue Coral Station"),
-        AprilTag(id: 13, position: SIMD3(-3.96, 0.745,  1.69), yaw: 0,          element: "Blue Coral Station"),
+        AprilTag(id: 12, position: SIMD3(-3.96, 0.745, -1.68), yaw: 0,          element: "Blue Supply Station"),
+        AprilTag(id: 13, position: SIMD3(-3.96, 0.745,  1.69), yaw: 0,          element: "Blue Supply Station"),
         // Blue Barge
-        AprilTag(id: 14, position: SIMD3(-0.25, 0.935,  1.06), yaw: .pi,        element: "Blue Barge"),
-        AprilTag(id: 15, position: SIMD3(-0.25, 0.935, -1.06), yaw: .pi,        element: "Blue Barge"),
+        AprilTag(id: 14, position: SIMD3(-0.25, 0.935,  1.06), yaw: .pi,        element: "Blue Skybridge"),
+        AprilTag(id: 15, position: SIMD3(-0.25, 0.935, -1.06), yaw: .pi,        element: "Blue Skybridge"),
         // Blue Processor
-        AprilTag(id: 16, position: SIMD3(-1.39, 0.65,  -2.01), yaw: .pi / 2,    element: "Blue Processor"),
+        AprilTag(id: 16, position: SIMD3(-1.39, 0.65,  -2.01), yaw: .pi / 2,    element: "Blue Recycler"),
         // Blue Reef Faces (17-22)
-        AprilTag(id: 17, position: SIMD3(-2.35, 0.155, -0.36), yaw: -2 * .pi / 3, element: "Blue Reef"),
-        AprilTag(id: 18, position: SIMD3(-2.56, 0.155,  0.00), yaw: .pi,        element: "Blue Reef"),
-        AprilTag(id: 19, position: SIMD3(-2.35, 0.155,  0.36), yaw: 2 * .pi / 3, element: "Blue Reef"),
-        AprilTag(id: 20, position: SIMD3(-1.93, 0.155,  0.36), yaw: .pi / 3,    element: "Blue Reef"),
-        AprilTag(id: 21, position: SIMD3(-1.73, 0.155,  0.00), yaw: 0,          element: "Blue Reef"),
-        AprilTag(id: 22, position: SIMD3(-1.93, 0.155, -0.36), yaw: -.pi / 3,   element: "Blue Reef"),
+        AprilTag(id: 17, position: SIMD3(-2.35, 0.155, -0.36), yaw: -2 * .pi / 3, element: "Blue Tower"),
+        AprilTag(id: 18, position: SIMD3(-2.56, 0.155,  0.00), yaw: .pi,        element: "Blue Tower"),
+        AprilTag(id: 19, position: SIMD3(-2.35, 0.155,  0.36), yaw: 2 * .pi / 3, element: "Blue Tower"),
+        AprilTag(id: 20, position: SIMD3(-1.93, 0.155,  0.36), yaw: .pi / 3,    element: "Blue Tower"),
+        AprilTag(id: 21, position: SIMD3(-1.73, 0.155,  0.00), yaw: 0,          element: "Blue Tower"),
+        AprilTag(id: 22, position: SIMD3(-1.93, 0.155, -0.36), yaw: -.pi / 3,   element: "Blue Tower"),
     ]
 
     // MARK: - Computed Reef Geometry
@@ -251,7 +248,7 @@ enum FieldSpec {
                      center.y + approachDist * sin(angle))
     }
 
-    // MARK: - Scoring Values (FRC 2025 REEFSCAPE Official)
+    // MARK: - Scoring Values
 
     struct Scoring {
         // Auto period points

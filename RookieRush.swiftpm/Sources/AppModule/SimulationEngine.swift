@@ -31,10 +31,29 @@ class RobotAgent {
     var lastFaceUsed: Int = -1
     weak var sceneNode: SCNNode?
 
+    // Cached component nodes for animation
+    var wheelNodes: [SCNNode] = []
+    var mechanismNode: SCNNode?   // elevator_stage or pivot_arm
+    var intakeNode: SCNNode?      // intake_roller
+
     init(config: RobotConfig) {
         self.config = config
         self.position = config.startPosition
         self.heading = config.alliance == .red ? Float.pi : 0
+    }
+
+    /// Cache references to animatable child nodes.
+    func cacheComponentNodes() {
+        guard let root = sceneNode else { return }
+        wheelNodes = []
+        root.enumerateChildNodes { child, _ in
+            if let name = child.name {
+                if name.hasPrefix("wheel_") { self.wheelNodes.append(child) }
+                else if name == "elevator_stage" { self.mechanismNode = child }
+                else if name == "pivot_arm" { self.mechanismNode = child }
+                else if name == "intake_roller" { self.intakeNode = child }
+            }
+        }
     }
 
     // MARK: - Utility-Based Goal Selection
@@ -271,6 +290,45 @@ class RobotAgent {
         guard let node = sceneNode else { return }
         node.position = SCNVector3(position.x, 0.0, position.y)
         node.eulerAngles.y = heading
+
+        // Animate wheels proportional to speed
+        let spinRate = speed * 3.0  // radians per second visual
+        for wheel in wheelNodes {
+            wheel.eulerAngles.x += spinRate * (1.0 / 30.0)  // ~30fps tick
+        }
+
+        // Animate intake roller when picking up
+        if state == .pickingUp, let intake = intakeNode {
+            intake.eulerAngles.x += Float.pi * 4.0 * (1.0 / 30.0)
+        }
+
+        // Animate mechanism during scoring
+        if state == .scoring, let mech = mechanismNode {
+            if mech.name == "elevator_stage" {
+                // Extend elevator upward based on target level
+                let targetY: Float
+                switch currentTargetLevel {
+                case 1: targetY = 0.08   // base position
+                case 2: targetY = 0.14
+                case 3: targetY = 0.22
+                default: targetY = 0.30  // L4 full extension
+                }
+                let baseY = config.build.mechanism == .elevator ? Float(0.08) : Float(0.08)
+                mech.position.y += (targetY + baseY - mech.position.y) * 0.08
+            } else if mech.name == "pivot_arm" {
+                // Tilt arm forward during scoring
+                let targetAngle: Float = -0.4  // tilt forward
+                mech.eulerAngles.x += (targetAngle - mech.eulerAngles.x) * 0.06
+            }
+        } else if let mech = mechanismNode {
+            // Return to rest position when not scoring
+            if mech.name == "elevator_stage" {
+                let baseY: Float = 0.08 + 0.08
+                mech.position.y += (baseY - mech.position.y) * 0.05
+            } else if mech.name == "pivot_arm" {
+                mech.eulerAngles.x += (0.35 - mech.eulerAngles.x) * 0.05
+            }
+        }
     }
 }
 
@@ -327,6 +385,7 @@ final class MatchEngine: ObservableObject {
         self.reefNodeTargets = reefNodes
         for (i, agent) in agents.enumerated() where i < robotNodes.count {
             agent.sceneNode = robotNodes[i]
+            agent.cacheComponentNodes()
             agent.syncToScene()
         }
         for agent in agents {
@@ -624,10 +683,7 @@ final class MatchEngine: ObservableObject {
         }
 
         if agent.hasPiece && isNearScoringTarget(agent) {
-            if rng.nextDouble() > agent.config.stats.reliability {
-                triggerStall(agent, duration: 1.5)
-                return
-            }
+            // Scoring attempt — ring physics in completeAction determines hit/miss
             agent.state = .scoring
             agent.actionTimer = agent.config.stats.scoringTime
             pulseNearestReefNode(to: agent.position)
@@ -679,14 +735,34 @@ final class MatchEngine: ObservableObject {
                 let isProcessor = isNearProcessor(agent)
                 let level = agent.currentTargetLevel
 
+                // Determine scoring success for ring physics
+                let scoringSuccess = rng.nextDouble() <= agent.config.stats.reliability
+
                 if isProcessor {
-                    let pts = isAuto ? FieldSpec.Scoring.autoProcessor : FieldSpec.Scoring.teleopProcessor
-                    addScore(alliance: agent.config.alliance, points: pts,
-                             period: isAuto ? .auto : .teleop, isProcessor: true)
+                    if scoringSuccess {
+                        let pts = isAuto ? FieldSpec.Scoring.autoProcessor : FieldSpec.Scoring.teleopProcessor
+                        addScore(alliance: agent.config.alliance, points: pts,
+                                 period: isAuto ? .auto : .teleop, isProcessor: true)
+                    }
+                    // Processor doesn't show ring arc
                 } else {
-                    let pts = scoringPoints(level: level, isAuto: isAuto)
-                    addScore(alliance: agent.config.alliance, points: pts,
-                             period: isAuto ? .auto : .teleop, reefLevel: level)
+                    // Compute target position for ring projectile
+                    let reefCenter = agent.config.alliance == .red
+                        ? FieldSpec.redReefCenter : FieldSpec.blueReefCenter
+                    let face = agent.lastFaceUsed >= 0 ? agent.lastFaceUsed : 0
+                    let targetPos = FieldSpec.scoringApproach(center: reefCenter, faceIndex: face)
+
+                    // Spawn visual ring projectile
+                    spawnRingProjectile(
+                        from: agent.position, to: targetPos,
+                        level: level, success: scoringSuccess
+                    )
+
+                    if scoringSuccess {
+                        let pts = scoringPoints(level: level, isAuto: isAuto)
+                        addScore(alliance: agent.config.alliance, points: pts,
+                                 period: isAuto ? .auto : .teleop, reefLevel: level)
+                    }
                 }
             }
             agent.state = .idle
@@ -864,6 +940,111 @@ final class MatchEngine: ObservableObject {
         }
     }
 
+    // MARK: - Ring Projectile Physics
+
+    /// Spawn a game piece ring that arcs toward the scoring target.
+    /// On success: ring lands on the tower and stays.
+    /// On miss: ring arcs off-target, falls with gravity, bounces, and fades out.
+    private func spawnRingProjectile(from agentPos: SIMD2<Float>, to targetPos: SIMD2<Float>,
+                                      level: Int, success: Bool) {
+        guard let scene = scene else { return }
+
+        let ring = FieldBuilder.makeRingProjectile()
+        let startPos = SCNVector3(agentPos.x, 0.18, agentPos.y)  // robot top height
+        ring.position = startPos
+        ring.scale = SCNVector3(0.8, 0.8, 0.8)
+        scene.rootNode.addChildNode(ring)
+
+        // Target height based on level
+        let targetHeight: Float
+        switch level {
+        case 1: targetHeight = FieldSpec.troughL1 + 0.06
+        case 2: targetHeight = FieldSpec.branchL2 + 0.02
+        case 3: targetHeight = FieldSpec.branchL3 + 0.02
+        default: targetHeight = FieldSpec.branchL4 + 0.02
+        }
+
+        if success {
+            // Parabolic arc to target (quadratic bezier)
+            let endPos = SCNVector3(targetPos.x, targetHeight, targetPos.y)
+            let midY = max(targetHeight + 0.25, 0.5)
+            let midPos = SCNVector3(
+                (agentPos.x + targetPos.x) / 2,
+                midY,
+                (agentPos.y + targetPos.y) / 2
+            )
+
+            let duration: TimeInterval = 0.55
+            let arc = SCNAction.customAction(duration: duration) { node, elapsed in
+                let t = Float(elapsed / duration)
+                let inv = 1 - t
+                node.position.x = inv * inv * startPos.x + 2 * inv * t * midPos.x + t * t * endPos.x
+                node.position.y = inv * inv * startPos.y + 2 * inv * t * midPos.y + t * t * endPos.y
+                node.position.z = inv * inv * startPos.z + 2 * inv * t * midPos.z + t * t * endPos.z
+                // Spin during flight
+                node.eulerAngles.z += 0.15
+            }
+
+            // Land: slight scale bump, then stay
+            let land = SCNAction.sequence([
+                SCNAction.scale(to: 1.1, duration: 0.06),
+                SCNAction.scale(to: 0.85, duration: 0.15)
+            ])
+
+            ring.runAction(SCNAction.sequence([arc, land]))
+        } else {
+            // Miss: offset target, arc, then fall and bounce
+            let missX = targetPos.x + (Float.random(in: -0.2...0.2))
+            let missZ = targetPos.y + (Float.random(in: -0.2...0.2))
+            let overshootH = targetHeight * 0.65  // doesn't reach full height
+            let midY = max(overshootH + 0.15, 0.4)
+            let missEnd = SCNVector3(missX, overshootH, missZ)
+            let midPos = SCNVector3(
+                (agentPos.x + missX) / 2,
+                midY,
+                (agentPos.y + missZ) / 2
+            )
+
+            // Arc to miss point
+            let arcDuration: TimeInterval = 0.45
+            let arc = SCNAction.customAction(duration: arcDuration) { node, elapsed in
+                let t = Float(elapsed / arcDuration)
+                let inv = 1 - t
+                node.position.x = inv * inv * startPos.x + 2 * inv * t * midPos.x + t * t * missEnd.x
+                node.position.y = inv * inv * startPos.y + 2 * inv * t * midPos.y + t * t * missEnd.y
+                node.position.z = inv * inv * startPos.z + 2 * inv * t * midPos.z + t * t * missEnd.z
+                node.eulerAngles.z += 0.2
+            }
+
+            // Fall with gravity (easeIn = accelerating)
+            let fallTarget = SCNVector3(missEnd.x, 0.03, missEnd.z)
+            let fall = SCNAction.move(to: fallTarget, duration: 0.3)
+            fall.timingMode = .easeIn
+
+            // Bounce
+            let bounce = SCNAction.moveBy(x: 0, y: 0.06, z: 0, duration: 0.12)
+            bounce.timingMode = .easeOut
+            let settle = SCNAction.moveBy(x: 0, y: -0.06, z: 0, duration: 0.10)
+            settle.timingMode = .easeIn
+
+            // Small second bounce
+            let bounce2 = SCNAction.moveBy(x: 0, y: 0.025, z: 0, duration: 0.08)
+            bounce2.timingMode = .easeOut
+            let settle2 = SCNAction.moveBy(x: 0, y: -0.025, z: 0, duration: 0.06)
+            settle2.timingMode = .easeIn
+
+            // Fade and remove
+            let fade = SCNAction.fadeOut(duration: 1.0)
+            let remove = SCNAction.removeFromParentNode()
+
+            ring.runAction(SCNAction.sequence([
+                arc, fall, bounce, settle, bounce2, settle2,
+                SCNAction.wait(duration: 0.3),
+                fade, remove
+            ]))
+        }
+    }
+
     // MARK: - Coaching Tips
 
     private func generateCoachingTip() {
@@ -873,7 +1054,7 @@ final class MatchEngine: ObservableObject {
                 guard let def = defenders.first else { return nil }
                 return CoachingTip(
                     headline: "Defense in Action",
-                    detail: "Notice how #\(def.config.teamNumber) positions between opponents and their reef. Their \(def.config.build.drivetrain.shortLabel) drive gives them \(def.config.stats.canDeepClimb ? "deep climb (12pts)" : "speed advantage") in endgame.",
+                    detail: "Notice how #\(def.config.teamNumber) positions between opponents and their tower. Their \(def.config.build.drivetrain.shortLabel) drive gives them \(def.config.stats.canDeepClimb ? "deep climb (12pts)" : "speed advantage") in endgame.",
                     highlightRobotId: def.config.id
                 )
             },
@@ -927,7 +1108,7 @@ final class MatchEngine: ObservableObject {
                 let unique = Set(builds).count
                 return CoachingTip(
                     headline: "Build Variety",
-                    detail: "There are \(unique) different build combos on the field. In real FRC, each team's robot is unique — some teams prioritize speed, others reliability or reach.",
+                    detail: "There are \(unique) different build combos on the field. In competitions, each team's robot is unique — some teams prioritize speed, others reliability or reach.",
                     highlightRobotId: nil
                 )
             },
@@ -943,7 +1124,7 @@ final class MatchEngine: ObservableObject {
 
         currentTip = CoachingTip(
             headline: "Watch the Field",
-            detail: "Pay attention to robot paths. Teams that avoid traffic jams and cycle efficiently score more. The hexagonal reef has 6 faces — spreading out prevents congestion!",
+            detail: "Pay attention to robot paths. Teams that avoid traffic jams and cycle efficiently score more. The hexagonal tower has 6 faces — spreading out prevents congestion!",
             highlightRobotId: nil
         )
     }

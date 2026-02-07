@@ -1,4 +1,108 @@
 import SwiftUI
+import SceneKit
+
+// MARK: - 3D Robot Preview
+
+/// Rotating 3D preview of the current robot build, shown on the build selection page.
+struct RobotPreviewView: UIViewRepresentable {
+    let build: RobotBuild
+    let role: RobotRole
+
+    func makeUIView(context: Context) -> SCNView {
+        let view = SCNView()
+        view.backgroundColor = .clear
+        view.allowsCameraControl = false
+        view.autoenablesDefaultLighting = false
+        view.antialiasingMode = .multisampling2X
+
+        let scene = SCNScene()
+        scene.background.contents = UIColor.clear
+
+        // Camera
+        let cam = SCNCamera()
+        cam.fieldOfView = 30
+        cam.zNear = 0.01
+        cam.zFar = 10
+        let camNode = SCNNode()
+        camNode.camera = cam
+        camNode.position = SCNVector3(0, 0.35, 0.9)
+        camNode.eulerAngles.x = -0.35
+        scene.rootNode.addChildNode(camNode)
+
+        // Lighting
+        let keyLight = SCNNode()
+        keyLight.light = SCNLight()
+        keyLight.light?.type = .omni
+        keyLight.light?.intensity = 900
+        keyLight.light?.color = UIColor(white: 0.95, alpha: 1)
+        keyLight.position = SCNVector3(0.6, 1.2, 0.8)
+        scene.rootNode.addChildNode(keyLight)
+
+        let fillLight = SCNNode()
+        fillLight.light = SCNLight()
+        fillLight.light?.type = .omni
+        fillLight.light?.intensity = 400
+        fillLight.light?.color = UIColor(white: 0.85, alpha: 1)
+        fillLight.position = SCNVector3(-0.4, 0.5, -0.5)
+        scene.rootNode.addChildNode(fillLight)
+
+        let ambLight = SCNNode()
+        ambLight.light = SCNLight()
+        ambLight.light?.type = .ambient
+        ambLight.light?.intensity = 350
+        scene.rootNode.addChildNode(ambLight)
+
+        // Floor disc for grounding
+        let floorGeo = SCNCylinder(radius: 0.3, height: 0.005)
+        floorGeo.radialSegmentCount = 24
+        let floorMat = SCNMaterial()
+        floorMat.diffuse.contents = UIColor(white: 0.12, alpha: 0.5)
+        floorGeo.materials = [floorMat]
+        let floorNode = SCNNode(geometry: floorGeo)
+        floorNode.position = SCNVector3(0, -0.002, 0)
+        scene.rootNode.addChildNode(floorNode)
+
+        view.scene = scene
+        buildAndAddRobot(to: scene)
+        return view
+    }
+
+    func updateUIView(_ uiView: SCNView, context: Context) {
+        guard let scene = uiView.scene else { return }
+        // Remove old robot
+        scene.rootNode.childNode(withName: "preview_robot", recursively: false)?.removeFromParentNode()
+        buildAndAddRobot(to: scene)
+    }
+
+    private func buildAndAddRobot(to scene: SCNScene) {
+        let config = RobotFactory.previewConfig(build: build, role: role)
+        let robot = RobotBuilder.buildRobot(config: config)
+        robot.name = "preview_robot"
+        scene.rootNode.addChildNode(robot)
+
+        // Gentle rotation
+        let rotate = SCNAction.repeatForever(
+            SCNAction.rotateBy(x: 0, y: CGFloat.pi * 2, z: 0, duration: 10)
+        )
+        robot.runAction(rotate)
+
+        // Spin wheels for visual flair
+        robot.enumerateChildNodes { child, _ in
+            if let name = child.name, name.hasPrefix("wheel_") {
+                let spin = SCNAction.repeatForever(
+                    SCNAction.rotateBy(x: CGFloat.pi * 2, y: 0, z: 0, duration: 1.0)
+                )
+                child.runAction(spin)
+            }
+            if child.name == "intake_roller" {
+                let spin = SCNAction.repeatForever(
+                    SCNAction.rotateBy(x: 0, y: 0, z: CGFloat.pi * 2, duration: 0.8)
+                )
+                child.runAction(spin)
+            }
+        }
+    }
+}
 
 // MARK: - Pre-Match View
 
@@ -203,6 +307,25 @@ struct PreMatchView: View {
                 }
             }
 
+            // 3D Robot Preview
+            VStack(spacing: 6) {
+                Text("PREVIEW")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .tracking(1)
+                RobotPreviewView(
+                    build: selectedBuild,
+                    role: selectedRole ?? .scorer
+                )
+                .frame(height: 200)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color(red: 0.06, green: 0.06, blue: 0.10))
+                )
+                .accessibilityLabel("3D preview of your robot build: \(selectedBuild.drivetrain.shortLabel) drive with \(selectedBuild.mechanism.shortLabel) mechanism and \(selectedBuild.intake.shortLabel) intake")
+            }
+
             // Build summary
             buildSummaryCard
 
@@ -287,7 +410,7 @@ struct PreMatchView: View {
                 }
             }
 
-            tipBanner(text: "Riskier autos attempt more game pieces but have a higher stall chance. In FRC, consistency often wins matches!")
+            tipBanner(text: "Riskier autos attempt more game pieces but have a higher stall chance. In competition, consistency often wins matches!")
         }
     }
 
