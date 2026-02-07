@@ -228,25 +228,32 @@ struct MatchView: View {
 
             Spacer()
 
-            // Callout buttons
-            ForEach(Callout.allCases) { callout in
-                Button(action: { engine.useCallout(callout) }) {
-                    VStack(spacing: 2) {
-                        Image(systemName: callout.icon)
-                            .font(.caption)
-                        Text(callout.rawValue)
-                            .font(.system(size: 8, weight: .bold))
+            // Callout buttons (6 options, scrollable)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 5) {
+                    ForEach(Callout.allCases) { callout in
+                        Button(action: { engine.useCallout(callout) }) {
+                            VStack(spacing: 1) {
+                                Image(systemName: callout.icon)
+                                    .font(.system(size: 10))
+                                Text(callout.rawValue)
+                                    .font(.system(size: 7, weight: .bold))
+                                Text(callout.subtitle)
+                                    .font(.system(size: 6))
+                                    .foregroundStyle(.white.opacity(0.35))
+                            }
+                            .foregroundStyle(engine.canUseCallout ? callout.color : .white.opacity(0.3))
+                            .frame(minWidth: 50)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.white.opacity(engine.canUseCallout ? 0.08 : 0.03))
+                            )
+                        }
+                        .disabled(!engine.canUseCallout)
+                        .accessibilityLabel("Callout: \(callout.rawValue) — \(callout.subtitle)")
                     }
-                    .foregroundStyle(engine.canUseCallout ? callout.color : .white.opacity(0.3))
-                    .frame(minWidth: 58)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color.white.opacity(engine.canUseCallout ? 0.08 : 0.03))
-                    )
                 }
-                .disabled(!engine.canUseCallout)
-                .accessibilityLabel("Callout: \(callout.rawValue)")
             }
         }
         .padding(10)

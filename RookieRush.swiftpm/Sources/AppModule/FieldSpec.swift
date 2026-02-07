@@ -145,6 +145,25 @@ enum FieldSpec {
     static let coralLength: Float = 0.076   // 11.875in → 302mm → scene
     static let algaeRadius: Float = 0.103   // 16in diameter → scene
 
+    // MARK: - Algae on Reef
+    // 3 algae per reef on alternating faces (0, 2, 4).
+    // Seated between L3 and L4 branch heights on the outer face.
+
+    static let algaeOnReefFaces: [Int] = [0, 2, 4]
+    static let algaeReefHeight: Float = (branchL3 + branchL4) / 2
+
+    // MARK: - Carpet Zones
+    // Red carpet covers +X half, blue carpet covers -X half
+
+    static let redCarpetCenter: Float  =  halfLength / 2   // +X half
+    static let blueCarpetCenter: Float = -halfLength / 2   // -X half
+
+    // MARK: - Coral Station Chute
+    // Real chute angle: 55° from horizontal → 0.96 radians
+
+    static let coralChuteAngle: Float = 0.96  // radians (~55°)
+    static let coralChuteHeight: Float = 0.40 // scene units
+
     // MARK: - AprilTag Specification
 
     static let aprilTagSize: Float = 0.103  // 8.125in → 20.6cm → scene

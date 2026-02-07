@@ -132,14 +132,17 @@ struct PreMatchView: View {
                 sectionLabel("Drivetrain", icon: "gearshape.2.fill")
 
                 ForEach(DrivetrainType.allCases) { dt in
-                    selectionCard(
-                        title: dt.rawValue,
-                        icon: dt.icon,
-                        description: dt.description,
-                        color: dt.color,
-                        isSelected: selectedBuild.drivetrain == dt
-                    ) {
-                        withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.drivetrain = dt }
+                    VStack(spacing: 0) {
+                        selectionCard(
+                            title: dt.rawValue,
+                            icon: dt.icon,
+                            description: dt.description,
+                            color: dt.color,
+                            isSelected: selectedBuild.drivetrain == dt
+                        ) {
+                            withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.drivetrain = dt }
+                        }
+                        prosConsRow(pros: dt.pros, cons: dt.cons)
                     }
                 }
             }
@@ -173,7 +176,9 @@ struct PreMatchView: View {
                             Spacer()
                         }
                         .padding(.horizontal, 16)
-                        .padding(.bottom, 6)
+                        .padding(.bottom, 2)
+
+                        prosConsRow(pros: mech.pros, cons: mech.cons)
                     }
                 }
             }
@@ -183,14 +188,17 @@ struct PreMatchView: View {
                 sectionLabel("Intake", icon: "hand.point.up.fill")
 
                 ForEach(IntakeType.allCases) { intake in
-                    selectionCard(
-                        title: intake.rawValue,
-                        icon: intake.icon,
-                        description: intake.description,
-                        color: intake.color,
-                        isSelected: selectedBuild.intake == intake
-                    ) {
-                        withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.intake = intake }
+                    VStack(spacing: 0) {
+                        selectionCard(
+                            title: intake.rawValue,
+                            icon: intake.icon,
+                            description: intake.description,
+                            color: intake.color,
+                            isSelected: selectedBuild.intake == intake
+                        ) {
+                            withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.intake = intake }
+                        }
+                        prosConsRow(pros: intake.pros, cons: intake.cons)
                     }
                 }
             }
@@ -198,7 +206,7 @@ struct PreMatchView: View {
             // Build summary
             buildSummaryCard
 
-            tipBanner(text: "In real FRC, robot design is the biggest decision teams make. Higher-reaching mechanisms score more but take longer. Fast drivetrains cycle quicker.")
+            tipBanner(text: "Every build has tradeoffs! Swerve+Elevator scores high but is fragile. Tank+Simple cycles fast and gets deep climb (12pts). No combo is best — it depends on your role.")
         }
     }
 
@@ -476,5 +484,31 @@ struct PreMatchView: View {
         case .moderate: return "Med"
         case .risky: return "High"
         }
+    }
+
+    @ViewBuilder
+    private func prosConsRow(pros: String, cons: String) -> some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.green.opacity(0.7))
+                Text(pros)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.green.opacity(0.6))
+                Spacer()
+            }
+            HStack(spacing: 4) {
+                Image(systemName: "minus.circle.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.red.opacity(0.7))
+                Text(cons)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.red.opacity(0.6))
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
     }
 }
