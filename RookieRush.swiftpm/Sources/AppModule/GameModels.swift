@@ -441,6 +441,28 @@ enum RobotState: String {
     case autoPath       = "Auto Path"
 }
 
+// MARK: - AI State (planning)
+
+enum AIState: String {
+    case seekPickup
+    case acquire
+    case seekScore
+    case score
+    case defend
+    case endgame
+}
+
+struct RobotDebugInfo: Identifiable {
+    let id: Int
+    let teamNumber: String
+    let alliance: Alliance
+    let role: RobotRole
+    let aiState: AIState
+    let goal: String
+    let hasPiece: Bool
+    let speed: Float
+}
+
 // MARK: - Game Piece
 
 struct GamePiece: Identifiable {
@@ -553,7 +575,7 @@ struct CoachingTip: Equatable {
 
 // MARK: - Robot Factory
 
-enum RobotFactory {
+enum RobotLineupFactory {
 
     private static let redTeamNumbers  = ["9999", "2468", "1357"]
     private static let blueTeamNumbers = ["254", "1678", "118"]

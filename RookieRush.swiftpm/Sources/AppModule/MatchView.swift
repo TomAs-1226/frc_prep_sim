@@ -24,7 +24,7 @@ struct MatchView: View {
         self.autoPlan = autoPlan
         self.onFinish = onFinish
 
-        let configs = RobotFactory.buildRobots(
+        let configs = RobotLineupFactory.buildRobots(
             playerRole: playerRole, strategy: strategy, playerBuild: playerBuild
         )
         _engine = StateObject(wrappedValue: MatchEngine(
@@ -99,10 +99,27 @@ struct MatchView: View {
                 Spacer()
 
                 // Coaching panel (visible during slow-mo)
-                CoachingPanel(tip: engine.currentTip, isVisible: engine.isSlowMo)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
-                    .animation(.easeInOut(duration: 0.3), value: engine.isSlowMo)
+                VStack(spacing: 8) {
+                    CoachingPanel(tip: engine.currentTip, isVisible: engine.isSlowMo)
+                        .animation(.easeInOut(duration: 0.3), value: engine.isSlowMo)
+
+                    if engine.isSlowMo {
+                        Button(action: { engine.resumeNormalSpeed() }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "play.fill")
+                                Text("Resume 2×")
+                                    .font(.caption.bold())
+                            }
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Capsule().fill(Color.orange))
+                        }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
 
                 // Footer text
                 Text("Demo Level 1 — future levels will be more in-depth")
@@ -120,6 +137,10 @@ struct MatchView: View {
             // "Match Over" overlay
             if engine.isFinished {
                 matchOverOverlay
+            }
+
+            if engine.showDiagnostics {
+                diagnosticsOverlay
             }
         }
         .onAppear {
@@ -226,6 +247,23 @@ struct MatchView: View {
             .disabled(engine.isSlowMo || !engine.isRunning)
             .accessibilityLabel("Activate slow motion coaching")
 
+            Button(action: { engine.showDiagnostics.toggle() }) {
+                HStack(spacing: 5) {
+                    Image(systemName: engine.showDiagnostics ? "waveform.path.ecg.rectangle.fill" : "waveform.path.ecg.rectangle")
+                        .font(.caption)
+                    Text(engine.showDiagnostics ? "Diagnostics On" : "Diagnostics")
+                        .font(.caption.bold())
+                }
+                .foregroundStyle(engine.showDiagnostics ? .black : .white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(engine.showDiagnostics ? Color.green : Color.white.opacity(0.1))
+                )
+            }
+            .accessibilityLabel("Toggle diagnostics overlay")
+
             Spacer()
 
             // Callout buttons (6 options, scrollable, per-callout availability)
@@ -309,6 +347,56 @@ struct MatchView: View {
         .modifier(GlassModifier(shape: RoundedRectangle(cornerRadius: 20)))
         .transition(.scale.combined(with: .opacity))
     }
+
+    private var diagnosticsOverlay: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Diagnostics")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.green)
+            Text(String(format: "FPS: %.0f", engine.fps))
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.9))
+            Text(String(format: "Frame dt: %.3fs", engine.frameDt))
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.9))
+            Text(String(format: "Sim Speed: %.1fx", engine.speedMultiplier))
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.9))
+
+            Divider().background(Color.white.opacity(0.2))
+
+            ForEach(engine.robotDebugInfo) { info in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(info.alliance == .red ? Color.red : Color.blue)
+                        .frame(width: 6, height: 6)
+                    Text("#\(info.teamNumber)")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white)
+                    Text(info.aiState.rawValue)
+                        .font(.system(size: 8))
+                        .foregroundStyle(.white.opacity(0.6))
+                    Text(info.goal)
+                        .font(.system(size: 8))
+                        .foregroundStyle(.green.opacity(0.8))
+                }
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.black.opacity(0.7))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.green.opacity(0.5), lineWidth: 1)
+                )
+        )
+        .frame(maxWidth: 260)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.top, 70)
+        .padding(.leading, 12)
+        .transition(.opacity)
+    }
 }
 
 // MARK: - SceneKit Representable
@@ -324,8 +412,8 @@ struct MatchSceneView: UIViewRepresentable {
         view.allowsCameraControl = true  // Drag to orbit, pinch to zoom
 
         let (scene, reefNodes) = FieldBuilder.buildScene()
-        let robotNodes = RobotBuilder.addRobots(to: scene, configs: engine.configs)
-        engine.attach(scene: scene, robotNodes: robotNodes, reefNodes: reefNodes)
+        let robotEntities = RobotFactory.addRobots(to: scene, configs: engine.configs)
+        engine.attach(scene: scene, robotEntities: robotEntities, reefNodes: reefNodes)
 
         view.scene = scene
         onSceneReady(scene)
