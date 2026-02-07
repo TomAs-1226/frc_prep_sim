@@ -2,6 +2,16 @@
 
 A Swift Playground App (.swiftpm) that teaches FRC (FIRST Robotics Competition) strategy through an interactive 6-robot match simulation. Act as alliance strategist, make real-time decisions, and learn from AI-powered coaching.
 
+## Fix Summary
+
+- Replaced the update loop with a fixed-timestep CADisplayLink accumulator, unified sim speed multiplier, and an in-app diagnostics overlay for FPS/dt and robot AI state.
+- Corrected swerve module hierarchy (module → steer pivot → wheel roll), matched wheel roll rate to linear velocity, and enforced wheel ground clearance.
+- Implemented kinematic robot motion with acceleration limits, pure heading steering, and non-clipping constraints for robots vs. robots and field structures.
+- Added a deterministic coral state machine (OnGround → InIntake → Carried → ScoringAnim → Scored/Dropped) with attachment, scoring path, and drop bounce.
+- Rebuilt AI as a deterministic FSM with utility scoring and role-specific weights (SeekPickup, Acquire, SeekScore, Score, Defend, Endgame).
+- Refactored robot construction into a unified RobotFactory that builds preview and match entities with validation; preview errors show an on-screen card.
+- Polished slow-mo coaching with a resume button and highlight rings for key robots.
+
 ## The Problem
 
 New FRC students are overwhelmed by strategy decisions, robot roles, autonomous routines, and alliance coordination. Match Coach provides a fast, low-pressure, interactive simulation where users experience these concepts firsthand — leading a 3-robot alliance against 3 opponents in under 3 minutes.
@@ -91,9 +101,10 @@ RookieRush.swiftpm/
 
 - **SceneKit** for 3D rendering — more stable in Swift Playgrounds than RealityKit
 - **Procedural geometry only** — all 6 robot types and field elements built from SCNBox, SCNCylinder, SCNTorus, SCNSphere, SCNText. Zero imported assets
-- **Timer-based 30fps game loop** for 6-robot simultaneous kinematic movement
-- **Robot AI state machines** with policy weight-based goal selection (scoring/defense/endgame)
-- **Simple collision avoidance** via pairwise separation resolution
+- **Fixed-timestep CADisplayLink loop** with accumulator for stable 6-robot kinematics
+- **Deterministic AI FSM + utility planner** for pickup, scoring, defense, and endgame
+- **Explicit non-clipping constraints** via keep-out regions and separation resolution
+- **RobotFactory** for preview + match entities, with validation and error reporting
 - **Seeded RNG** (xorshift64) for deterministic simulation runs
 - **SwiftUI overlays** on SceneKit for all UI (scoreboard, callouts, coaching panel)
 - **iOS 26 Liquid Glass** applied conditionally via `GlassModifier`
@@ -128,3 +139,11 @@ Each robot has a visually distinct superstructure built from primitives:
 ## Credits
 
 Built for the Apple Swift Student Challenge 2026. Inspired by the FRC community's spirit of helping rookies learn through hands-on strategy experience.
+
+## How to verify
+
+- Wheels roll on the correct axis and steer smoothly toward travel direction.
+- Robots avoid clipping into each other or into reefs/barge/walls.
+- Coral motion follows: pickup → carry → score → seat (or drop to ground).
+- AI decisions are deterministic and explainable in the diagnostics overlay.
+- Build preview matches in-game robots and shows an error card if missing parts.

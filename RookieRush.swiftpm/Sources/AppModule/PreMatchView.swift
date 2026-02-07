@@ -7,6 +7,7 @@ import SceneKit
 struct RobotPreviewView: UIViewRepresentable {
     let build: RobotBuild
     let role: RobotRole
+    let onBuildError: (String?) -> Void
 
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
@@ -75,10 +76,18 @@ struct RobotPreviewView: UIViewRepresentable {
     }
 
     private func buildAndAddRobot(to scene: SCNScene) {
-        let config = RobotFactory.previewConfig(build: build, role: role)
-        let robot = RobotBuilder.buildRobot(config: config)
+        let config = RobotLineupFactory.previewConfig(build: build, role: role)
+        let preview = RobotFactory.buildPreviewEntity(config: config)
+        let robot = preview.root
         robot.name = "preview_robot"
         scene.rootNode.addChildNode(robot)
+
+        let errorMessage = preview.validation.isValid
+            ? nil
+            : "Missing: \(preview.validation.missing.joined(separator: \", \"))"
+        DispatchQueue.main.async {
+            onBuildError(errorMessage)
+        }
 
         // Gentle rotation
         let rotate = SCNAction.repeatForever(
@@ -115,6 +124,7 @@ struct PreMatchView: View {
     @State private var selectedRole: RobotRole?
     @State private var selectedBuild = RobotBuild()
     @State private var selectedAuto: AutoPlan?
+    @State private var previewError: String?
 
     private let stepCount = 4
     private let stepLabels = ["Strategy", "Role", "Robot Build", "Auto Plan"]
@@ -313,16 +323,25 @@ struct PreMatchView: View {
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.white.opacity(0.4))
                     .tracking(1)
-                RobotPreviewView(
-                    build: selectedBuild,
-                    role: selectedRole ?? .scorer
-                )
-                .frame(height: 200)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(Color(red: 0.06, green: 0.06, blue: 0.10))
-                )
+                ZStack {
+                    RobotPreviewView(
+                        build: selectedBuild,
+                        role: selectedRole ?? .scorer,
+                        onBuildError: { previewError = $0 }
+                    )
+                    .frame(height: 200)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color(red: 0.06, green: 0.06, blue: 0.10))
+                    )
+
+                    if let previewError {
+                        previewErrorCard(message: previewError)
+                            .padding(12)
+                            .transition(.opacity)
+                    }
+                }
                 .accessibilityLabel("3D preview of your robot build: \(selectedBuild.drivetrain.shortLabel) drive with \(selectedBuild.mechanism.shortLabel) mechanism and \(selectedBuild.intake.shortLabel) intake")
             }
 
@@ -362,6 +381,32 @@ struct PreMatchView: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
                         .strokeBorder(Color.orange.opacity(0.2), lineWidth: 1)
+                )
+        )
+    }
+
+    private func previewErrorCard(message: String) -> some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.yellow)
+                Text("Preview Error")
+                    .font(.caption.bold())
+                    .foregroundStyle(.white)
+            }
+            Text(message)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.7))
+                .multilineTextAlignment(.center)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.black.opacity(0.75))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.yellow.opacity(0.6), lineWidth: 1)
                 )
         )
     }

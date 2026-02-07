@@ -683,13 +683,41 @@ enum FieldBuilder {
     }
 }
 
-// MARK: - Robot Builder
+// MARK: - Robot Factory
 
-enum RobotBuilder {
+struct WheelModuleRef {
+    let moduleRoot: SCNNode
+    let steerPivot: SCNNode
+    let wheelRoll: SCNNode
+    let wheelRadius: Float
+}
+
+struct RobotValidation {
+    let missing: [String]
+    var isValid: Bool { missing.isEmpty }
+}
+
+struct RobotPreviewEntity {
+    let root: SCNNode
+    let validation: RobotValidation
+}
+
+struct RobotMatchEntity {
+    let root: SCNNode
+    let swerveModules: [WheelModuleRef]
+    let tankWheels: [SCNNode]
+    let intakeAnchor: SCNNode?
+    let mechanismNode: SCNNode?
+    let intakeRoller: SCNNode?
+    let validation: RobotValidation
+}
+
+enum RobotFactory {
 
     // Shared wheel geometry
+    private static let swerveWheelRadius: Float = 0.035
     private static let swerveWheelGeo: SCNCylinder = {
-        let g = SCNCylinder(radius: 0.035, height: 0.025); g.radialSegmentCount = 12
+        let g = SCNCylinder(radius: CGFloat(swerveWheelRadius), height: 0.025); g.radialSegmentCount = 12
         let m = SCNMaterial(); m.diffuse.contents = UIColor.darkGray; g.materials = [m]; return g
     }()
     private static let swerveHousingGeo: SCNCylinder = {
@@ -701,7 +729,12 @@ enum RobotBuilder {
         let m = SCNMaterial(); m.diffuse.contents = UIColor.darkGray; g.materials = [m]; return g
     }()
 
-    static func buildRobot(config: RobotConfig) -> SCNNode {
+    static func buildPreviewEntity(config: RobotConfig) -> RobotPreviewEntity {
+        let entity = buildMatchEntity(config: config)
+        return RobotPreviewEntity(root: entity.root, validation: entity.validation)
+    }
+
+    static func buildMatchEntity(config: RobotConfig) -> RobotMatchEntity {
         let root = SCNNode()
         root.name = "robot_\(config.id)"
         let allianceColor = config.alliance.uiColor
@@ -715,6 +748,7 @@ enum RobotBuilder {
         chassisMat.metalness.contents = 0.4
         chassisGeo.materials = [chassisMat]
         let chassis = SCNNode(geometry: chassisGeo)
+        chassis.name = "chassis"
         chassis.position = SCNVector3(0, Float(cH / 2), 0)
         root.addChildNode(chassis)
 
@@ -724,24 +758,36 @@ enum RobotBuilder {
         bMat.diffuse.contents = allianceColor.withAlphaComponent(0.85)
         bGeo.materials = [bMat]
         let bumpers = SCNNode(geometry: bGeo)
+        bumpers.name = "bumpers"
         bumpers.position = SCNVector3(0, Float(cH * 0.25), 0)
         root.addChildNode(bumpers)
 
+        var swerveModules: [WheelModuleRef] = []
+        var tankWheels: [SCNNode] = []
+
         // Wheels
         if config.build.drivetrain == .swerve {
-            addSwerveWheels(to: root, cW: cW, cL: cL)
+            swerveModules = addSwerveModules(to: root, cW: cW, cL: cL)
         } else {
-            addTankWheels(to: root, cW: cW, cL: cL)
+            tankWheels = addTankWheels(to: root, cW: cW, cL: cL)
         }
 
         // Superstructure
         let baseY = Float(cH)
+        var mechanismNode: SCNNode?
+        var intakeRoller: SCNNode?
         switch config.superstructure {
-        case .elevator: addElevator(to: root, baseY: baseY, color: allianceColor)
-        case .arm:      addPivotArm(to: root, baseY: baseY, color: allianceColor)
-        case .intake:   addLowIntake(to: root, baseY: baseY, cL: Float(cL), color: allianceColor)
+        case .elevator: mechanismNode = addElevator(to: root, baseY: baseY, color: allianceColor)
+        case .arm:      mechanismNode = addPivotArm(to: root, baseY: baseY, color: allianceColor)
+        case .intake:   intakeRoller = addLowIntake(to: root, baseY: baseY, cL: Float(cL), color: allianceColor)
         case .wedge:    addWedge(to: root, baseY: baseY, cW: Float(cW), cL: Float(cL), color: allianceColor)
         }
+
+        // Intake anchor (for carried coral)
+        let intakeAnchor = SCNNode()
+        intakeAnchor.name = "intake_anchor"
+        intakeAnchor.position = SCNVector3(0, baseY + 0.05, Float(cL / 2) + 0.09)
+        root.addChildNode(intakeAnchor)
 
         // Team number plate
         let label = SCNText(string: config.teamNumber, extrusionDepth: 0.002)
@@ -755,31 +801,67 @@ enum RobotBuilder {
         labelNode.position = SCNVector3(0, Float(cH * 0.6), Float(cL / 2) + 0.005)
         root.addChildNode(labelNode)
 
-        return root
+        let validation = validateRobot(root: root, expectsSwerve: config.build.drivetrain == .swerve)
+        #if DEBUG
+        assert(validation.isValid, "Robot build missing: \(validation.missing.joined(separator: \", \"))")
+        #endif
+
+        return RobotMatchEntity(
+            root: root,
+            swerveModules: swerveModules,
+            tankWheels: tankWheels,
+            intakeAnchor: intakeAnchor,
+            mechanismNode: mechanismNode,
+            intakeRoller: intakeRoller,
+            validation: validation
+        )
     }
 
     // MARK: - Drivetrain Visuals
 
-    private static func addSwerveWheels(to root: SCNNode, cW: CGFloat, cL: CGFloat) {
+    private static func addSwerveModules(to root: SCNNode, cW: CGFloat, cL: CGFloat) -> [WheelModuleRef] {
         let positions: [(CGFloat, CGFloat)] = [
-            (-cW/2 + 0.03, -cL/2 + 0.04), (cW/2 - 0.03, -cL/2 + 0.04),
-            (-cW/2 + 0.03, cL/2 - 0.04), (cW/2 - 0.03, cL/2 - 0.04)
+            (-cW / 2 + 0.03, -cL / 2 + 0.04), (cW / 2 - 0.03, -cL / 2 + 0.04),
+            (-cW / 2 + 0.03, cL / 2 - 0.04), (cW / 2 - 0.03, cL / 2 - 0.04)
         ]
+        var modules: [WheelModuleRef] = []
         for (i, (ox, oz)) in positions.enumerated() {
-            let hn = SCNNode(geometry: swerveHousingGeo)
-            hn.position = SCNVector3(Float(ox), 0.01, Float(oz))
-            root.addChildNode(hn)
+            let moduleRoot = SCNNode()
+            moduleRoot.name = "swerve_module_\(i)"
+            moduleRoot.position = SCNVector3(Float(ox), swerveWheelRadius, Float(oz))
+            root.addChildNode(moduleRoot)
 
-            let wn = SCNNode(geometry: swerveWheelGeo)
-            wn.eulerAngles.z = .pi / 2
-            wn.position = SCNVector3(Float(ox), 0.035, Float(oz))
-            wn.name = "wheel_\(i)"
-            root.addChildNode(wn)
+            let steerPivot = SCNNode()
+            steerPivot.name = "swerve_steer_\(i)"
+            moduleRoot.addChildNode(steerPivot)
+
+            let housing = SCNNode(geometry: swerveHousingGeo)
+            housing.position = SCNVector3(0, swerveWheelRadius + 0.01, 0)
+            steerPivot.addChildNode(housing)
+
+            let wheelRoll = SCNNode()
+            wheelRoll.name = "swerve_roll_\(i)"
+            steerPivot.addChildNode(wheelRoll)
+
+            let wheelVisual = SCNNode(geometry: swerveWheelGeo)
+            wheelVisual.eulerAngles.z = .pi / 2
+            wheelVisual.position = SCNVector3(0, 0, 0)
+            wheelVisual.name = "wheel_\(i)"
+            wheelRoll.addChildNode(wheelVisual)
+
+            modules.append(WheelModuleRef(
+                moduleRoot: moduleRoot,
+                steerPivot: steerPivot,
+                wheelRoll: wheelRoll,
+                wheelRadius: swerveWheelRadius
+            ))
         }
+        return modules
     }
 
-    private static func addTankWheels(to root: SCNNode, cW: CGFloat, cL: CGFloat) {
+    private static func addTankWheels(to root: SCNNode, cW: CGFloat, cL: CGFloat) -> [SCNNode] {
         var idx = 0
+        var wheels: [SCNNode] = []
         for side: CGFloat in [-1, 1] {
             for zOff: CGFloat in [-cL/2 + 0.05, 0, cL/2 - 0.05] {
                 let wn = SCNNode(geometry: tankWheelGeo)
@@ -787,14 +869,16 @@ enum RobotBuilder {
                 wn.position = SCNVector3(Float(side * (cW/2 - 0.01)), 0.04, Float(zOff))
                 wn.name = "wheel_\(idx)"
                 root.addChildNode(wn)
+                wheels.append(wn)
                 idx += 1
             }
         }
+        return wheels
     }
 
     // MARK: - Superstructures
 
-    private static func addElevator(to root: SCNNode, baseY: Float, color: UIColor) {
+    private static func addElevator(to root: SCNNode, baseY: Float, color: UIColor) -> SCNNode {
         let railColor = UIColor(white: 0.45, alpha: 1)
 
         for dx: Float in [-0.06, 0.06] {
@@ -828,9 +912,10 @@ enum RobotBuilder {
         let brNode = SCNNode(geometry: brace)
         brNode.position = SCNVector3(0, baseY + 0.37, -0.04)
         root.addChildNode(brNode)
+        return innerStage
     }
 
-    private static func addPivotArm(to root: SCNNode, baseY: Float, color: UIColor) {
+    private static func addPivotArm(to root: SCNNode, baseY: Float, color: UIColor) -> SCNNode {
         let pivotY = baseY + 0.04
         let armLen: Float = 0.28
         let arm = SCNCylinder(radius: 0.012, height: CGFloat(armLen)); arm.radialSegmentCount = 8
@@ -853,9 +938,10 @@ enum RobotBuilder {
         let bn = SCNNode(geometry: base)
         bn.position = SCNVector3(0, pivotY, -0.06)
         root.addChildNode(bn)
+        return armNode
     }
 
-    private static func addLowIntake(to root: SCNNode, baseY: Float, cL: Float, color: UIColor) {
+    private static func addLowIntake(to root: SCNNode, baseY: Float, cL: Float, color: UIColor) -> SCNNode {
         let roller = SCNCylinder(radius: 0.028, height: 0.22); roller.radialSegmentCount = 12
         let rMat = SCNMaterial(); rMat.diffuse.contents = UIColor.systemTeal; roller.materials = [rMat]
         let rn = SCNNode(geometry: roller)
@@ -877,6 +963,7 @@ enum RobotBuilder {
         let hn = SCNNode(geometry: hopper)
         hn.position = SCNVector3(0, baseY + 0.015, 0)
         root.addChildNode(hn)
+        return rn
     }
 
     private static func addWedge(to root: SCNNode, baseY: Float, cW: Float, cL: Float, color: UIColor) {
@@ -895,14 +982,37 @@ enum RobotBuilder {
         root.addChildNode(pn)
     }
 
+    // MARK: - Validation
+
+    private static func validateRobot(root: SCNNode, expectsSwerve: Bool) -> RobotValidation {
+        var missing: [String] = []
+        if root.childNode(withName: "chassis", recursively: true) == nil {
+            missing.append("chassis")
+        }
+        if root.childNode(withName: "bumpers", recursively: true) == nil {
+            missing.append("bumpers")
+        }
+        if root.childNode(withName: "intake_anchor", recursively: true) == nil {
+            missing.append("intake_anchor")
+        }
+        if expectsSwerve {
+            for i in 0..<4 {
+                if root.childNode(withName: "swerve_module_\(i)", recursively: true) == nil {
+                    missing.append("swerve_module_\(i)")
+                }
+            }
+        }
+        return RobotValidation(missing: missing)
+    }
+
     // MARK: - Add All Robots to Scene
 
-    static func addRobots(to scene: SCNScene, configs: [RobotConfig]) -> [SCNNode] {
+    static func addRobots(to scene: SCNScene, configs: [RobotConfig]) -> [RobotMatchEntity] {
         configs.map { config in
-            let robot = buildRobot(config: config)
-            robot.position = SCNVector3(config.startPosition.x, 0.0, config.startPosition.y)
-            robot.eulerAngles.y = config.alliance == .red ? Float.pi : 0
-            scene.rootNode.addChildNode(robot)
+            let robot = buildMatchEntity(config: config)
+            robot.root.position = SCNVector3(config.startPosition.x, 0.0, config.startPosition.y)
+            robot.root.eulerAngles.y = config.alliance == .red ? Float.pi : 0
+            scene.rootNode.addChildNode(robot.root)
             return robot
         }
     }

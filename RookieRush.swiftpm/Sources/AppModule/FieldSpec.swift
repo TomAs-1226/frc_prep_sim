@@ -248,6 +248,26 @@ enum FieldSpec {
                      center.y + approachDist * sin(angle))
     }
 
+    /// Scoring socket transforms for seated coral. Slots fan across the face tangent.
+    static func scoringSocket(center: SIMD2<Float>, faceIndex: Int, level: Int, slot: Int)
+        -> (position: SIMD3<Float>, yaw: Float) {
+        let face = reefFaces(center: center)[faceIndex]
+        let normal = SIMD2<Float>(cos(face.angle), sin(face.angle))
+        let tangent = SIMD2<Float>(-sin(face.angle), cos(face.angle))
+        let slotOffset: Float = slot == 0 ? -0.05 : 0.05
+        let outward: Float = reefApothem + 0.045
+        let height: Float
+        switch level {
+        case 1: height = troughL1 + 0.045
+        case 2: height = branchL2 + 0.03
+        case 3: height = branchL3 + 0.03
+        default: height = branchL4 + 0.03
+        }
+        let pos2d = face.center + normal * outward + tangent * slotOffset
+        let yaw = face.angle + .pi / 2
+        return (SIMD3(pos2d.x, height, pos2d.y), yaw)
+    }
+
     // MARK: - Scoring Values
 
     struct Scoring {
