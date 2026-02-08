@@ -69,7 +69,6 @@ struct RobotPreviewView: UIViewRepresentable {
 
     func updateUIView(_ uiView: SCNView, context: Context) {
         guard let scene = uiView.scene else { return }
-        // Remove old robot
         scene.rootNode.childNode(withName: "preview_robot", recursively: false)?.removeFromParentNode()
         buildAndAddRobot(to: scene)
     }
@@ -80,13 +79,11 @@ struct RobotPreviewView: UIViewRepresentable {
         robot.name = "preview_robot"
         scene.rootNode.addChildNode(robot)
 
-        // Gentle rotation
         let rotate = SCNAction.repeatForever(
             SCNAction.rotateBy(x: 0, y: CGFloat.pi * 2, z: 0, duration: 10)
         )
         robot.runAction(rotate)
 
-        // Spin wheels for visual flair
         robot.enumerateChildNodes { child, _ in
             if let name = child.name, name.hasPrefix("wheel_") {
                 let spin = SCNAction.repeatForever(
@@ -104,10 +101,13 @@ struct RobotPreviewView: UIViewRepresentable {
     }
 }
 
-// MARK: - Pre-Match View
+// MARK: - Robot Workshop (Pre-Match View)
 
-/// 4-step selection: Alliance Strategy → Robot Role → Robot Build → Auto Plan.
+/// 5-step workshop: Game Reveal -> Robot Build -> Strategy -> Role -> Auto Plan.
+/// The star experience of the app — players see the generated game challenge first,
+/// then build their robot to match it, then choose strategy and role.
 struct PreMatchView: View {
+    let game: GeneratedGame
     let onReady: (AllianceStrategy, RobotRole, RobotBuild, AutoPlan) -> Void
 
     @State private var step = 0
@@ -116,8 +116,12 @@ struct PreMatchView: View {
     @State private var selectedBuild = RobotBuild()
     @State private var selectedAuto: AutoPlan?
 
-    private let stepCount = 4
-    private let stepLabels = ["Strategy", "Role", "Robot Build", "Auto Plan"]
+    private let stepCount = 5
+    private let stepLabels = ["Game", "Build", "Strategy", "Role", "Auto"]
+
+    private var fieldMatchScore: Int {
+        game.buildMatchScore(build: selectedBuild)
+    }
 
     var body: some View {
         ZStack {
@@ -131,18 +135,17 @@ struct PreMatchView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Progress bar
                 progressBar
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
 
-                // Step content
                 ScrollView {
                     VStack(spacing: 20) {
                         switch step {
-                        case 0: strategyStep
-                        case 1: roleStep
-                        case 2: buildStep
+                        case 0: gameRevealStep
+                        case 1: buildStep
+                        case 2: strategyStep
+                        case 3: roleStep
                         default: autoStep
                         }
                     }
@@ -151,7 +154,6 @@ struct PreMatchView: View {
                     .padding(.bottom, 100)
                 }
 
-                // Bottom bar
                 bottomBar
             }
         }
@@ -176,66 +178,194 @@ struct PreMatchView: View {
         .animation(.easeInOut(duration: 0.3), value: step)
     }
 
-    // MARK: - Strategy Selection
+    // MARK: - Step 0: Game Reveal
 
     @ViewBuilder
-    private var strategyStep: some View {
-        VStack(spacing: 8) {
-            stepHeader(title: "Alliance Strategy", subtitle: "How should your 3-robot alliance play?")
+    private var gameRevealStep: some View {
+        VStack(spacing: 16) {
+            stepHeader(title: "Game Reveal", subtitle: "Study the challenge before you build.")
 
-            ForEach(AllianceStrategy.allCases) { strat in
-                selectionCard(
-                    title: strat.rawValue,
-                    icon: strat.icon,
-                    description: strat.description,
-                    color: strat.color,
-                    isSelected: selectedStrategy == strat
-                ) {
-                    withAnimation(.easeInOut(duration: 0.2)) { selectedStrategy = strat }
+            // Game name
+            VStack(spacing: 6) {
+                Text(game.name.uppercased())
+                    .font(.system(size: 28, weight: .black))
+                    .foregroundStyle(.white)
+                    .tracking(1.5)
+                    .multilineTextAlignment(.center)
+
+                // Archetype badge
+                HStack(spacing: 8) {
+                    Image(systemName: game.archetype.icon)
+                        .font(.subheadline)
+                        .foregroundStyle(game.archetype.color)
+                    Text(game.archetype.rawValue)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(game.archetype.color)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule().fill(game.archetype.color.opacity(0.15))
+                )
+            }
+            .padding(.bottom, 4)
+
+            // Archetype description
+            Text(game.archetype.description)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.6))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
+
+            // Scoring zones by height
+            VStack(alignment: .leading, spacing: 10) {
+                sectionLabel("Scoring Zones", icon: "target")
+
+                let redZones = game.redZones
+                let grouped = Dictionary(grouping: redZones) { $0.height }
+
+                ForEach(ScoringHeight.allCases.reversed(), id: \.self) { height in
+                    if let zones = grouped[height], !zones.isEmpty {
+                        HStack(spacing: 12) {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(height.color)
+                                .frame(width: 4, height: 32)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(height.displayName)
+                                    .font(.subheadline.bold())
+                                    .foregroundStyle(height.color)
+                                Text("\(zones.count) target\(zones.count == 1 ? "" : "s") - \(zones[0].pointsTeleop)pts each (teleop)")
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.5))
+                            }
+
+                            Spacer()
+
+                            Text("\(zones.count)x")
+                                .font(.headline.bold())
+                                .foregroundStyle(height.color.opacity(0.8))
+                        }
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(height.color.opacity(0.06))
+                        )
+                    }
                 }
             }
 
-            tipBanner(text: "Aggressive strategies score more but are vulnerable to defense. Defensive strategies limit opponents but need efficient scorers.")
-        }
-    }
+            // Endgame challenge
+            VStack(alignment: .leading, spacing: 8) {
+                sectionLabel("Endgame Challenge", icon: "flag.checkered")
 
-    // MARK: - Role Selection
+                HStack(spacing: 14) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.purple.opacity(0.2))
+                            .frame(width: 44, height: 44)
+                        Image(systemName: game.endgameChallenge.icon)
+                            .font(.title3)
+                            .foregroundStyle(.purple)
+                    }
 
-    @ViewBuilder
-    private var roleStep: some View {
-        VStack(spacing: 8) {
-            stepHeader(title: "Your Robot Role", subtitle: "What role will YOUR robot play on the alliance?")
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(game.endgameChallenge.displayName)
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                        Text("\(game.endgameChallenge.points) points per robot")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
 
-            ForEach(RobotRole.allCases) { role in
-                selectionCard(
-                    title: role.rawValue,
-                    icon: role.icon,
-                    description: role.description,
-                    color: roleColor(role),
-                    isSelected: selectedRole == role
-                ) {
-                    withAnimation(.easeInOut(duration: 0.2)) { selectedRole = role }
+                    Spacer()
+
+                    Text("+\(game.endgameChallenge.points)")
+                        .font(.title3.bold())
+                        .foregroundStyle(.purple)
+                }
+                .padding(14)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color.white.opacity(0.04))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .strokeBorder(Color.purple.opacity(0.3), lineWidth: 1)
+                        )
+                )
+            }
+
+            // Game pieces
+            VStack(alignment: .leading, spacing: 8) {
+                sectionLabel("Game Pieces", icon: "shippingbox.fill")
+
+                HStack(spacing: 12) {
+                    ForEach(game.gamePieces, id: \.rawValue) { piece in
+                        HStack(spacing: 8) {
+                            Image(systemName: piece.icon)
+                                .font(.title3)
+                                .foregroundStyle(piece.color)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(piece.rawValue)
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.white.opacity(0.8))
+                                Text("Best: \(piece.idealIntake.shortLabel)")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.white.opacity(0.4))
+                            }
+                        }
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(piece.color.opacity(0.08))
+                        )
+                    }
+                    Spacer()
                 }
             }
 
-            if let strat = selectedStrategy {
-                tipBanner(text: "With \"\(strat.rawValue)\" strategy, your teammates will complement your role automatically.")
+            // Challenge hints
+            VStack(alignment: .leading, spacing: 6) {
+                sectionLabel("Scouting Tips", icon: "lightbulb.fill")
+
+                ForEach(Array(game.challengeHints.enumerated()), id: \.offset) { _, hint in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "chevron.right.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.yellow.opacity(0.7))
+                            .padding(.top, 2)
+                        Text(hint)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.6))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.yellow.opacity(0.04))
+            )
+
+            tipBanner(text: "Study these targets and hints carefully. Your robot build on the next step should match this game's demands!")
         }
     }
 
-    // MARK: - Robot Build Selection
+    // MARK: - Step 1: Robot Build
 
     @ViewBuilder
     private var buildStep: some View {
         VStack(spacing: 16) {
-            stepHeader(title: "Build Your Robot", subtitle: "Choose the hardware for your robot.")
+            stepHeader(title: "Build Your Robot", subtitle: "Choose hardware to match \(game.name).")
+
+            // Live field match score gauge
+            fieldMatchGauge
 
             // Drivetrain
             VStack(alignment: .leading, spacing: 8) {
                 sectionLabel("Drivetrain", icon: "gearshape.2.fill")
 
-                ForEach(DrivetrainType.allCases) { dt in
+                ForEach(DrivetrainChoice.allCases) { dt in
                     VStack(spacing: 0) {
                         selectionCard(
                             title: dt.rawValue,
@@ -251,38 +381,66 @@ struct PreMatchView: View {
                 }
             }
 
-            // Mechanism
+            // Frame
             VStack(alignment: .leading, spacing: 8) {
-                sectionLabel("Scoring Mechanism", icon: "arrow.up.and.down")
+                sectionLabel("Frame", icon: "square.grid.3x3")
 
-                ForEach(MechanismType.allCases) { mech in
+                ForEach(FrameChoice.allCases) { fr in
                     VStack(spacing: 0) {
                         selectionCard(
-                            title: mech.rawValue,
-                            icon: mech.icon,
-                            description: mech.description,
-                            color: mech.color,
-                            isSelected: selectedBuild.mechanism == mech
+                            title: fr.rawValue,
+                            icon: fr.icon,
+                            description: fr.description,
+                            color: fr.color,
+                            isSelected: selectedBuild.frame == fr
                         ) {
-                            withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.mechanism = mech }
+                            withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.frame = fr }
+                        }
+                        prosConsRow(pros: fr.pros, cons: fr.cons)
+                    }
+                }
+            }
+
+            // Manipulator
+            VStack(alignment: .leading, spacing: 8) {
+                sectionLabel("Manipulator", icon: "arrow.up.and.down")
+
+                ForEach(ManipulatorChoice.allCases) { manip in
+                    VStack(spacing: 0) {
+                        selectionCard(
+                            title: manip.rawValue,
+                            icon: manip.icon,
+                            description: manip.description,
+                            color: manip.color,
+                            isSelected: selectedBuild.manipulator == manip
+                        ) {
+                            withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.manipulator = manip }
                         }
 
-                        // Level indicator
+                        // Level reach indicator
                         HStack(spacing: 8) {
                             Text("Reaches:")
                                 .font(.system(size: 9))
                                 .foregroundStyle(.white.opacity(0.4))
-                            ForEach(1...4, id: \.self) { lvl in
-                                Text("L\(lvl)")
+                            ForEach(ScoringHeight.allCases, id: \.self) { h in
+                                Text(h.displayName)
                                     .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(lvl <= mech.maxLevel ? mech.color : .white.opacity(0.15))
+                                    .foregroundStyle(
+                                        h <= manip.maxReach ? manip.color : .white.opacity(0.15)
+                                    )
                             }
                             Spacer()
+
+                            if game.maxScoringHeight > manip.maxReach {
+                                Text("Can't reach \(game.maxScoringHeight.displayName)!")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.red.opacity(0.7))
+                            }
                         }
                         .padding(.horizontal, 16)
                         .padding(.bottom, 2)
 
-                        prosConsRow(pros: mech.pros, cons: mech.cons)
+                        prosConsRow(pros: manip.pros, cons: manip.cons)
                     }
                 }
             }
@@ -291,7 +449,7 @@ struct PreMatchView: View {
             VStack(alignment: .leading, spacing: 8) {
                 sectionLabel("Intake", icon: "hand.point.up.fill")
 
-                ForEach(IntakeType.allCases) { intake in
+                ForEach(IntakeChoice.allCases) { intake in
                     VStack(spacing: 0) {
                         selectionCard(
                             title: intake.rawValue,
@@ -302,6 +460,23 @@ struct PreMatchView: View {
                         ) {
                             withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.intake = intake }
                         }
+
+                        // Ideal piece match indicator
+                        let idealPieces = game.gamePieces.filter { $0.idealIntake == intake }
+                        if !idealPieces.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.green.opacity(0.7))
+                                Text("Ideal for: \(idealPieces.map(\.rawValue).joined(separator: ", "))")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.green.opacity(0.6))
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 2)
+                        }
+
                         prosConsRow(pros: intake.pros, cons: intake.cons)
                     }
                 }
@@ -323,15 +498,95 @@ struct PreMatchView: View {
                     RoundedRectangle(cornerRadius: 14)
                         .fill(Color(red: 0.06, green: 0.06, blue: 0.10))
                 )
-                .accessibilityLabel("3D preview of your robot build: \(selectedBuild.drivetrain.shortLabel) drive with \(selectedBuild.mechanism.shortLabel) mechanism and \(selectedBuild.intake.shortLabel) intake")
+                .accessibilityLabel("3D preview of your robot build: \(selectedBuild.drivetrain.shortLabel) drive with \(selectedBuild.manipulator.shortLabel) mechanism and \(selectedBuild.intake.shortLabel) intake")
             }
 
             // Build summary
             buildSummaryCard
 
-            tipBanner(text: "Every build has tradeoffs! Swerve+Elevator scores high but is fragile. Tank+Simple cycles fast and gets deep climb (12pts). No combo is best — it depends on your role.")
+            tipBanner(text: "Every build has tradeoffs! Match your manipulator's reach to the game's scoring heights and your intake to the game pieces for the best Field Match Score.")
         }
     }
+
+    // MARK: - Field Match Score Gauge
+
+    @ViewBuilder
+    private var fieldMatchGauge: some View {
+        let score = fieldMatchScore
+        let gaugeColor = gaugeColorForScore(score)
+
+        VStack(spacing: 8) {
+            HStack {
+                Image(systemName: "gauge.with.dots.needle.67percent")
+                    .font(.subheadline)
+                    .foregroundStyle(gaugeColor)
+                Text("FIELD MATCH SCORE")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .tracking(1)
+                Spacer()
+                Text("\(score)")
+                    .font(.system(size: 28, weight: .black))
+                    .foregroundStyle(gaugeColor)
+                Text("/ 100")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+
+            // Horizontal gauge bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(0.08))
+                        .frame(height: 8)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(
+                            LinearGradient(
+                                colors: [gaugeColor.opacity(0.6), gaugeColor],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                        )
+                        .frame(width: geo.size.width * CGFloat(score) / 100.0, height: 8)
+                        .animation(.easeInOut(duration: 0.4), value: score)
+                }
+            }
+            .frame(height: 8)
+
+            HStack {
+                Text(gaugeLabel(score))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(gaugeColor.opacity(0.8))
+                Spacer()
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(gaugeColor.opacity(0.06))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(gaugeColor.opacity(0.25), lineWidth: 1)
+                )
+        )
+        .animation(.easeInOut(duration: 0.3), value: score)
+    }
+
+    private func gaugeColorForScore(_ score: Int) -> Color {
+        if score >= 75 { return .green }
+        if score >= 55 { return .yellow }
+        if score >= 40 { return .orange }
+        return .red
+    }
+
+    private func gaugeLabel(_ score: Int) -> String {
+        if score >= 80 { return "Excellent match! This build fits the game perfectly." }
+        if score >= 65 { return "Good match. Your build handles most challenges well." }
+        if score >= 50 { return "Decent match. Some weaknesses against this game." }
+        if score >= 35 { return "Weak match. Consider changing parts to fit better." }
+        return "Poor match. This build will struggle on this field."
+    }
+
+    // MARK: - Build Summary Card
 
     @ViewBuilder
     private var buildSummaryCard: some View {
@@ -340,20 +595,28 @@ struct PreMatchView: View {
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.white.opacity(0.4))
                 .tracking(1)
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 buildChip(icon: selectedBuild.drivetrain.icon,
                           label: selectedBuild.drivetrain.shortLabel,
                           color: selectedBuild.drivetrain.color)
-                buildChip(icon: selectedBuild.mechanism.icon,
-                          label: selectedBuild.mechanism.shortLabel,
-                          color: selectedBuild.mechanism.color)
+                buildChip(icon: selectedBuild.frame.icon,
+                          label: selectedBuild.frame.shortLabel,
+                          color: selectedBuild.frame.color)
+                buildChip(icon: selectedBuild.manipulator.icon,
+                          label: selectedBuild.manipulator.shortLabel,
+                          color: selectedBuild.manipulator.color)
                 buildChip(icon: selectedBuild.intake.icon,
                           label: selectedBuild.intake.shortLabel,
                           color: selectedBuild.intake.color)
             }
-            Text("Max Level: L\(selectedBuild.mechanism.maxLevel)")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(selectedBuild.mechanism.color)
+            HStack(spacing: 16) {
+                Text("Max Level: \(selectedBuild.manipulator.maxReach.displayName)")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(selectedBuild.manipulator.color)
+                Text("Score: \(fieldMatchScore)/100")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(gaugeColorForScore(fieldMatchScore))
+            }
         }
         .padding(12)
         .background(
@@ -381,7 +644,55 @@ struct PreMatchView: View {
         .background(Capsule().fill(color.opacity(0.12)))
     }
 
-    // MARK: - Auto Selection
+    // MARK: - Step 2: Alliance Strategy
+
+    @ViewBuilder
+    private var strategyStep: some View {
+        VStack(spacing: 8) {
+            stepHeader(title: "Alliance Strategy", subtitle: "How should your 3-robot alliance play \(game.name)?")
+
+            ForEach(AllianceStrategy.allCases) { strat in
+                selectionCard(
+                    title: strat.rawValue,
+                    icon: strat.icon,
+                    description: strat.description,
+                    color: strat.color,
+                    isSelected: selectedStrategy == strat
+                ) {
+                    withAnimation(.easeInOut(duration: 0.2)) { selectedStrategy = strat }
+                }
+            }
+
+            tipBanner(text: "Aggressive strategies score more but are vulnerable to defense. Defensive strategies limit opponents but need efficient scorers.")
+        }
+    }
+
+    // MARK: - Step 3: Robot Role
+
+    @ViewBuilder
+    private var roleStep: some View {
+        VStack(spacing: 8) {
+            stepHeader(title: "Your Robot Role", subtitle: "What role will YOUR robot play on the alliance?")
+
+            ForEach(RobotRole.allCases) { role in
+                selectionCard(
+                    title: role.rawValue,
+                    icon: role.icon,
+                    description: role.description,
+                    color: roleColor(role),
+                    isSelected: selectedRole == role
+                ) {
+                    withAnimation(.easeInOut(duration: 0.2)) { selectedRole = role }
+                }
+            }
+
+            if let strat = selectedStrategy {
+                tipBanner(text: "With \"\(strat.rawValue)\" strategy, your teammates will complement your role automatically.")
+            }
+        }
+    }
+
+    // MARK: - Step 4: Auto Plan
 
     @ViewBuilder
     private var autoStep: some View {
@@ -409,6 +720,66 @@ struct PreMatchView: View {
                     .padding(.bottom, 8)
                 }
             }
+
+            // Final build summary reminder
+            VStack(spacing: 8) {
+                Text("YOUR SETUP")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .tracking(1)
+
+                HStack(spacing: 14) {
+                    VStack(spacing: 2) {
+                        Image(systemName: "wrench.and.screwdriver.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Text(selectedBuild.drivetrain.shortLabel)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                    VStack(spacing: 2) {
+                        Image(systemName: selectedBuild.manipulator.icon)
+                            .font(.caption)
+                            .foregroundStyle(selectedBuild.manipulator.color)
+                        Text(selectedBuild.manipulator.shortLabel)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                    if let strat = selectedStrategy {
+                        VStack(spacing: 2) {
+                            Image(systemName: strat.icon)
+                                .font(.caption)
+                                .foregroundStyle(strat.color)
+                            Text(strat.rawValue.components(separatedBy: " ").first ?? "")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                    }
+                    if let role = selectedRole {
+                        VStack(spacing: 2) {
+                            Image(systemName: role.icon)
+                                .font(.caption)
+                                .foregroundStyle(roleColor(role))
+                            Text(role.rawValue)
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                    }
+                }
+
+                Text("Field Match: \(fieldMatchScore)/100")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(gaugeColorForScore(fieldMatchScore))
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.white.opacity(0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(Color.orange.opacity(0.2), lineWidth: 1)
+                    )
+            )
 
             tipBanner(text: "Riskier autos attempt more game pieces but have a higher stall chance. In FRC, consistency often wins matches!")
         }
@@ -457,7 +828,7 @@ struct PreMatchView: View {
                 .accessibilityLabel(step < stepCount - 1 ? "Continue to next step" : "Start the match")
             }
 
-            Text("Demo Level 1 — future levels will be more in-depth")
+            Text("Robot Workshop v1 — build smart, win big")
                 .font(.system(size: 9))
                 .foregroundStyle(.white.opacity(0.2))
         }
@@ -470,9 +841,10 @@ struct PreMatchView: View {
 
     private var canAdvance: Bool {
         switch step {
-        case 0: return selectedStrategy != nil
-        case 1: return selectedRole != nil
-        case 2: return true  // Build always has defaults
+        case 0: return true          // Game reveal — always can continue
+        case 1: return true          // Build always has defaults
+        case 2: return selectedStrategy != nil
+        case 3: return selectedRole != nil
         default: return selectedAuto != nil
         }
     }
@@ -497,6 +869,7 @@ struct PreMatchView: View {
             Text(subtitle)
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.5))
+                .multilineTextAlignment(.center)
         }
         .padding(.bottom, 4)
     }

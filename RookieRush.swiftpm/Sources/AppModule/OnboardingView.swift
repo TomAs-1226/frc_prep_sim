@@ -2,35 +2,35 @@ import SwiftUI
 
 // MARK: - Onboarding View
 
-/// First-launch onboarding that introduces FRC concepts and the Match Coach app.
+/// First-launch onboarding that introduces FRC concepts and the Rookie Workshop app.
 struct OnboardingView: View {
     @Binding var hasCompletedOnboarding: Bool
     @State private var currentPage = 0
 
     private let pages: [(title: String, subtitle: String, icon: String, description: String)] = [
         (
-            "Welcome to Match Coach",
-            "Inspired by FRC Reefscape",
-            "gamecontroller.fill",
-            "FRC (FIRST Robotics Competition) is where students design, build, and program robots to compete in exciting challenges. This app teaches you how FRC match strategy works through interactive 6-robot simulations inspired by the Reefscape game."
+            "Welcome to Rookie Workshop",
+            "FRC Robot Builder",
+            "wrench.and.screwdriver.fill",
+            "FRC (FIRST Robotics Competition) is where students design, build, and program robots to compete in exciting challenges. This app teaches you how to analyze a game, build the right robot, and compete in 3v3 match simulations."
         ),
         (
-            "You're the Strategist",
-            "Lead Your Alliance",
-            "person.3.fill",
-            "In each match, you'll lead a 3-robot alliance. Choose your team's strategy, pick your robot's role and autonomous routine, then watch how your decisions play out against 3 opponents."
+            "Analyze & Build",
+            "Every Game is Different",
+            "gearshape.2.fill",
+            "Each round generates a unique field with random scoring zones, game pieces, and endgame challenges. Study the game, then pick the right parts for your robot: drivetrain, frame, manipulator, and intake. Smart builders match their robot to the game."
         ),
         (
             "6 Robots, 1 Field",
-            "Real-Time Simulation",
+            "3v3 Match Simulation",
             "play.rectangle.fill",
-            "Watch all 6 robots compete on a Reefscape-inspired field. Use slow-mo coaching to learn what's happening, and trigger strategic callouts to adjust mid-match — just like a real FRC drive coach."
+            "Watch all 6 robots compete on a procedurally generated field. Use slow-mo coaching to learn what is happening, and trigger strategic callouts to adjust mid-match -- just like a real FRC drive coach."
         ),
         (
             "AI-Powered Coaching",
             "Learn from Every Match",
             "brain.head.profile.fill",
-            "After each match, get personalized coaching feedback. On supported devices, this uses Apple's on-device AI. Your data stays private and everything works fully offline."
+            "After each match, get personalized coaching feedback including a Build Match Score that shows how well your robot fit the game. On supported devices, this uses Apple's on-device AI. Your data stays private and everything works fully offline."
         ),
     ]
 

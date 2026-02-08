@@ -12,6 +12,7 @@ private func distance2D(_ a: SIMD2<Float>, _ b: SIMD2<Float>) -> Float {
 
 class RobotAgent {
     let config: RobotConfig
+    let game: GeneratedGame
     var state: RobotState = .idle
     var position: SIMD2<Float>
     var heading: Float = 0
@@ -19,29 +20,30 @@ class RobotAgent {
     var hasPiece: Bool = false
     var piecesScored: Int = 0
     var piecesCycled: Int = 0
+    var didStall: Bool = false
     var isStalled: Bool = false
     var stallTimer: Double = 0
     var actionTimer: Double = 0
-    var targetPosition: SIMD2<Float>?
-    var currentTargetLevel: Int = 1
+    var currentGoal: SIMD2<Float>?
+    var lastZoneId: Int = -1
+    var currentTargetZone: ScoringZone?
     var hasCrossedAutoLine: Bool = false
     var isParkedEndgame: Bool = false
-    var didStall: Bool = false
     var autoPhase: Int = 0
-    var lastFaceUsed: Int = -1
-    weak var sceneNode: SCNNode?
 
     // Score awareness (updated each tick by MatchEngine)
     var teamScore: Int = 0
     var opponentScore: Int = 0
 
     // Cached component nodes for animation
+    weak var sceneNode: SCNNode?
     var wheelNodes: [SCNNode] = []
     var mechanismNode: SCNNode?   // elevator_stage or pivot_arm
     var intakeNode: SCNNode?      // intake_roller
 
-    init(config: RobotConfig) {
+    init(config: RobotConfig, game: GeneratedGame) {
         self.config = config
+        self.game = game
         self.position = config.startPosition
         self.heading = config.alliance == .red ? Float.pi : 0
     }
@@ -60,9 +62,24 @@ class RobotAgent {
         }
     }
 
+    // MARK: - Alliance Helpers
+
+    var allianceZones: [ScoringZone] {
+        game.scoringZones.filter { $0.alliance == config.alliance }
+    }
+
+    var reachableZones: [ScoringZone] {
+        allianceZones.filter { $0.height <= config.stats.maxReachHeight }
+    }
+
+    var alliancePickups: [PickupStation] {
+        game.pickupStations.filter { $0.alliance == config.alliance }
+    }
+
     // MARK: - Utility-Based Goal Selection
 
-    func decideGoal(simTime: Double, policy: StrategyPolicy, allAgents: [RobotAgent], rng: inout SeededRNG) {
+    func decideGoal(simTime: Double, policy: StrategyPolicy, allAgents: [RobotAgent],
+                    rng: inout SeededRNG) {
         guard state == .idle || state == .driving else { return }
 
         let timeRemaining = MatchTiming.totalDuration - simTime
@@ -72,7 +89,7 @@ class RobotAgent {
         let scoreDiff = teamScore - opponentScore
         var adjustedPolicy = policy
         if scoreDiff < -10 {
-            // Losing badly: boost scoring, reduce endgame weight (need to catch up)
+            // Losing badly: boost scoring, reduce endgame weight
             adjustedPolicy.scoringWeight = min(1.0, policy.scoringWeight + 0.2)
             adjustedPolicy.endgameWeight = max(0.05, policy.endgameWeight - 0.1)
         } else if scoreDiff > 15 {
@@ -86,8 +103,9 @@ class RobotAgent {
         if (period == .endgame || endgameUrgency > 0.7) && !isParkedEndgame {
             let endgameUtil = adjustedPolicy.endgameWeight + endgameUrgency * 1.5
             if endgameUtil > 0.8 || timeRemaining < 10 {
-                let barge = config.alliance == .red ? FieldLayout.redBarge : FieldLayout.blueBarge
-                targetPosition = barge
+                let endgamePos = config.alliance == .red
+                    ? FieldLayout.endgameRedPos : FieldLayout.endgameBluePos
+                currentGoal = endgamePos
                 state = .headingEndgame
                 return
             }
@@ -103,19 +121,23 @@ class RobotAgent {
                 let opponents = allAgents.filter {
                     $0.config.alliance != config.alliance && !$0.isParkedEndgame
                 }
-                if let target = opponents.max(by: { defenderPriority($0) < defenderPriority($1) }) {
-                    // Position between the target and THEIR reef
-                    let theirReef = config.alliance == .red
-                        ? FieldSpec.blueReefCenter : FieldSpec.redReefCenter
+                if let target = opponents.max(by: {
+                    defenderPriority($0) < defenderPriority($1)
+                }) {
+                    // Position between the target and THEIR scoring zones
+                    let opponentZones = game.scoringZones.filter {
+                        $0.alliance != config.alliance
+                    }
+                    let zoneCenter = zoneCentroid(opponentZones)
                     let blockPos = SIMD2<Float>(
-                        target.position.x * 0.6 + theirReef.x * 0.4,
-                        target.position.y * 0.6 + theirReef.y * 0.4
+                        target.position.x * 0.6 + zoneCenter.x * 0.4,
+                        target.position.y * 0.6 + zoneCenter.y * 0.4
                     )
                     let jitter = SIMD2<Float>(
                         rng.nextFloat() * 0.15 - 0.075,
                         rng.nextFloat() * 0.15 - 0.075
                     )
-                    targetPosition = blockPos + jitter
+                    currentGoal = blockPos + jitter
                     state = .defending
                     return
                 }
@@ -124,12 +146,13 @@ class RobotAgent {
 
         // --- Scoring: pick up or deliver ---
         if hasPiece {
-            let best = chooseBestScoringTarget(policy: adjustedPolicy, allAgents: allAgents, rng: &rng)
-            targetPosition = best.position
-            currentTargetLevel = best.level
+            let best = chooseBestScoringTarget(policy: adjustedPolicy,
+                                                allAgents: allAgents, rng: &rng)
+            currentGoal = best.position
+            currentTargetZone = best.zone
             state = .driving
         } else {
-            targetPosition = nearestSource(rng: &rng)
+            currentGoal = nearestPickupStation(rng: &rng)
             state = .driving
         }
     }
@@ -139,8 +162,8 @@ class RobotAgent {
     private func defenderPriority(_ opp: RobotAgent) -> Double {
         var score = 0.0
         if opp.hasPiece { score += 10.0 }
-        if opp.state == .scoring { score += 5.0 }  // About to score — high priority
-        if opp.state == .driving && opp.hasPiece { score += 3.0 }  // Heading to score
+        if opp.state == .scoring { score += 5.0 }
+        if opp.state == .driving && opp.hasPiece { score += 3.0 }
         if opp.config.role == .scorer { score += 3.0 }
         if opp.config.role == .cycler { score += 2.0 }
         score += Double(opp.piecesScored) * 0.5
@@ -151,107 +174,105 @@ class RobotAgent {
 
     // MARK: - Best Scoring Target (role-aware + congestion avoidance)
 
-    private func chooseBestScoringTarget(policy: StrategyPolicy, allAgents: [RobotAgent],
-                                          rng: inout SeededRNG) -> (position: SIMD2<Float>, level: Int) {
-        let maxLevel = config.stats.maxReefLevel
-        let reefCenter = config.alliance == .red ? FieldSpec.redReefCenter : FieldSpec.blueReefCenter
-        var bestPos = config.alliance == .red
-            ? FieldLayout.redReefApproach(0) : FieldLayout.blueReefApproach(0)
-        var bestLevel = 1
-        var bestUtil: Double = -1
+    private func chooseBestScoringTarget(
+        policy: StrategyPolicy,
+        allAgents: [RobotAgent],
+        rng: inout SeededRNG
+    ) -> (position: SIMD2<Float>, zone: ScoringZone?) {
+        let zones = reachableZones
+        guard !zones.isEmpty else {
+            // Fallback: head to any alliance zone even if can't reach height
+            let fallback = allianceZones.min {
+                distance2D(position, $0.position) < distance2D(position, $1.position)
+            }
+            return (fallback?.position ?? position, fallback)
+        }
 
         // Teammates for congestion check
         let teammates = allAgents.filter {
             $0.config.alliance == config.alliance && $0.config.id != config.id
         }
 
-        for face in 0..<6 {
-            let approach = config.alliance == .red
-                ? FieldLayout.redReefApproach(face)
-                : FieldLayout.blueReefApproach(face)
-            let dist = distance2D(position, approach)
+        var bestZone: ScoringZone?
+        var bestUtil: Double = -1
 
-            // Congestion penalty: count teammates near this face
+        for zone in zones {
+            let dist = distance2D(position, zone.position)
+
+            // Congestion penalty: count teammates near this zone
             let nearbyTeammates = teammates.filter {
-                distance2D($0.position, approach) < 0.5 ||
-                ($0.targetPosition != nil && distance2D($0.targetPosition!, approach) < 0.3)
+                distance2D($0.position, zone.position) < 0.5 ||
+                ($0.currentGoal != nil && distance2D($0.currentGoal!, zone.position) < 0.3)
             }.count
             let congestionPenalty = Double(nearbyTeammates) * 0.5
 
             // Spread bonus from callout
-            let spreadBonus: Double = (policy.spreadOut && face != lastFaceUsed) ? 0.3 : 0.0
+            let spreadBonus: Double = (policy.spreadOut && zone.id != lastZoneId) ? 0.3 : 0.0
 
-            for level in 1...maxLevel {
-                let basePoints: Double
-                switch level {
-                case 1: basePoints = 2
-                case 2: basePoints = 3
-                case 3: basePoints = 4
-                default: basePoints = 5
-                }
+            let basePoints = Double(zone.pointsTeleop)
 
-                // Role bias: cyclers prefer low levels, scorers prefer high
-                let roleBias: Double
-                switch config.role {
-                case .cycler:
-                    roleBias = level <= 2 ? 1.5 : 0.3
-                case .scorer:
-                    roleBias = level >= 3 ? 1.4 : 0.7
-                case .defender:
-                    roleBias = 1.0
-                }
+            // Role bias: cyclers prefer low zones, scorers prefer high
+            let roleBias: Double
+            switch config.role {
+            case .cycler:
+                roleBias = zone.height <= .low ? 1.5 : 0.3
+            case .scorer:
+                roleBias = zone.height >= .mid ? 1.4 : 0.7
+            case .defender:
+                roleBias = 1.0
+            }
 
-                // Focus High callout bonus
-                let highBonus: Double = (policy.preferHighLevel && level >= 3) ? 0.5 : 0.0
+            // Focus High callout bonus
+            let highBonus: Double = (policy.preferHighLevel && zone.height >= .mid) ? 0.5 : 0.0
 
-                let timeCost = Double(dist) / Double(max(0.5, config.stats.maxSpeed)) + config.stats.scoringTime
-                let util = (basePoints * roleBias + highBonus + spreadBonus) / max(0.3, timeCost + congestionPenalty)
+            let timeCost = Double(dist) / Double(max(0.5, config.stats.maxSpeed))
+                + config.stats.scoringTime
+            let util = (basePoints * roleBias + highBonus + spreadBonus)
+                / max(0.3, timeCost + congestionPenalty)
 
-                if util > bestUtil {
-                    bestUtil = util
-                    bestPos = approach
-                    bestLevel = level
-                    lastFaceUsed = face
-                }
+            if util > bestUtil {
+                bestUtil = util
+                bestZone = zone
             }
         }
 
-        // Also consider processor
-        let proc = config.alliance == .red ? FieldLayout.redProcessor : FieldLayout.blueProcessor
-        let procDist = distance2D(position, proc)
-        let procTimeCost = Double(procDist) / Double(max(0.5, config.stats.maxSpeed)) + 1.0
-        let procUtil = 6.0 / max(0.3, procTimeCost)
-        if procUtil > bestUtil {
-            bestPos = proc
-            bestLevel = 0
-        }
-
         // Small random variation for diversity
-        if rng.nextDouble() < 0.12 {
-            let randomFace = Int(rng.next() % 6)
-            bestPos = config.alliance == .red
-                ? FieldLayout.redReefApproach(randomFace)
-                : FieldLayout.blueReefApproach(randomFace)
-            bestLevel = rng.nextInt(1..<(maxLevel + 1))
-            lastFaceUsed = randomFace
+        if rng.nextDouble() < 0.12, !zones.isEmpty {
+            let randomIdx = rng.nextInt(0..<zones.count)
+            bestZone = zones[randomIdx]
         }
 
-        return (bestPos, bestLevel)
+        if let zone = bestZone {
+            lastZoneId = zone.id
+            return (zone.position, zone)
+        }
+        return (position, nil)
     }
 
-    // MARK: - Nearest Source
+    // MARK: - Nearest Pickup Station
 
-    private func nearestSource(rng: inout SeededRNG) -> SIMD2<Float> {
-        let jitter = SIMD2<Float>(rng.nextFloat() * 0.2 - 0.1, rng.nextFloat() * 0.3 - 0.15)
-        if config.alliance == .red {
-            let near = SIMD2<Float>(FieldSpec.redCoralNear.x - 0.3, FieldSpec.redCoralNear.y)
-            let far  = SIMD2<Float>(FieldSpec.redCoralFar.x - 0.3, FieldSpec.redCoralFar.y)
-            return (distance2D(position, near) < distance2D(position, far) ? near : far) + jitter
-        } else {
-            let near = SIMD2<Float>(FieldSpec.blueCoralNear.x + 0.3, FieldSpec.blueCoralNear.y)
-            let far  = SIMD2<Float>(FieldSpec.blueCoralFar.x + 0.3, FieldSpec.blueCoralFar.y)
-            return (distance2D(position, near) < distance2D(position, far) ? near : far) + jitter
+    private func nearestPickupStation(rng: inout SeededRNG) -> SIMD2<Float> {
+        let stations = alliancePickups
+        let jitter = SIMD2<Float>(
+            rng.nextFloat() * 0.2 - 0.1,
+            rng.nextFloat() * 0.3 - 0.15
+        )
+        if let nearest = stations.min(by: {
+            distance2D(position, $0.position) < distance2D(position, $1.position)
+        }) {
+            return nearest.position + jitter
         }
+        // Fallback: move toward own side
+        let fallbackX: Float = config.alliance == .red ? 3.5 : -3.5
+        return SIMD2<Float>(fallbackX, 0) + jitter
+    }
+
+    // MARK: - Zone Centroid
+
+    func zoneCentroid(_ zones: [ScoringZone]) -> SIMD2<Float> {
+        guard !zones.isEmpty else { return SIMD2(0, 0) }
+        let sum = zones.reduce(SIMD2<Float>(0, 0)) { $0 + $1.position }
+        return sum / Float(zones.count)
     }
 
     // MARK: - Period
@@ -266,27 +287,48 @@ class RobotAgent {
     // MARK: - Movement
 
     func updateMovement(dt: Float) {
-        guard let target = targetPosition else { return }
+        guard let target = currentGoal else { return }
 
-        // --- Obstacle avoidance: center skybridge ---
-        // If the direct path crosses the center structure, steer around it
-        let obstacleHalf: Float = FieldSpec.bargeTrussDepth / 2 + 0.15
-        let obstacleSpanHalf: Float = FieldSpec.bargeTrussSpan / 2 + 0.1
-        let effectiveTarget: SIMD2<Float>
-        let crossingCenter = (position.x > obstacleHalf && target.x < -obstacleHalf) ||
-                             (position.x < -obstacleHalf && target.x > obstacleHalf)
-        if crossingCenter && abs(position.y) < obstacleSpanHalf {
-            // Route to the nearest edge of the obstacle, then continue to target
-            let detourZ: Float = position.y >= 0
-                ? obstacleSpanHalf + 0.2
-                : -(obstacleSpanHalf + 0.2)
-            effectiveTarget = SIMD2<Float>(position.x > 0 ? obstacleHalf + 0.1 : -(obstacleHalf + 0.1), detourZ)
-        } else if abs(position.x) < obstacleHalf && abs(position.y) < obstacleSpanHalf {
-            // Currently inside obstacle zone — push out to nearest side
-            let pushX: Float = position.x >= 0 ? obstacleHalf + 0.1 : -(obstacleHalf + 0.1)
-            effectiveTarget = SIMD2<Float>(pushX, position.y)
-        } else {
-            effectiveTarget = target
+        // --- Obstacle avoidance ---
+        var effectiveTarget = target
+
+        // Barrier avoidance: if path crosses a barrier, route around it
+        for obs in game.obstacles where obs.kind == .barrier {
+            let hx = obs.size.x / 2 + 0.20
+            let hz = obs.size.y / 2 + 0.20
+            let relX = position.x - obs.position.x
+            let relZ = position.y - obs.position.y
+
+            // Push out if currently inside barrier zone
+            if abs(relX) < hx && abs(relZ) < hz {
+                if abs(relX) / hx > abs(relZ) / hz {
+                    position.x = obs.position.x + (relX >= 0 ? hx : -hx)
+                } else {
+                    position.y = obs.position.y + (relZ >= 0 ? hz : -hz)
+                }
+                speed *= 0.4
+            }
+
+            // If direct path crosses barrier, add detour
+            let crossingX = (position.x < obs.position.x - hx && target.x > obs.position.x + hx)
+                || (position.x > obs.position.x + hx && target.x < obs.position.x - hx)
+            if crossingX && abs(position.y - obs.position.y) < hz {
+                let detourZ = position.y >= obs.position.y
+                    ? obs.position.y + hz + 0.2
+                    : obs.position.y - hz - 0.2
+                let detourX = position.x > obs.position.x
+                    ? obs.position.x + hx + 0.1
+                    : obs.position.x - hx - 0.1
+                effectiveTarget = SIMD2<Float>(detourX, detourZ)
+            }
+        }
+
+        // Bridge: mild slowdown when under the beam structure
+        for obs in game.obstacles where obs.kind == .bridge {
+            let bridgeHalfX = obs.size.x / 2
+            if abs(position.x - obs.position.x) < bridgeHalfX {
+                speed *= 0.9
+            }
         }
 
         let dx = effectiveTarget.x - position.x
@@ -294,8 +336,6 @@ class RobotAgent {
         let dist = sqrt(dx * dx + dz * dz)
 
         if dist < 0.15 {
-            // Check if this was a detour — if we reached the detour point, the actual
-            // target is still the original. Let decideGoal re-evaluate.
             speed = 0
             return
         }
@@ -318,17 +358,14 @@ class RobotAgent {
         position.y += cos(heading) * speed * dt
 
         // Clamp to field bounds
-        position.x = max(-FieldLayout.halfWidth + 0.15, min(FieldLayout.halfWidth - 0.15, position.x))
-        position.y = max(-FieldLayout.halfLength + 0.15, min(FieldLayout.halfLength - 0.15, position.y))
-
-        // Soft repulsion from center obstacle
-        if abs(position.x) < obstacleHalf && abs(position.y) < obstacleSpanHalf {
-            position.x += (position.x >= 0 ? 0.02 : -0.02)
-        }
+        position.x = max(-FieldLayout.halfWidth + 0.15,
+                         min(FieldLayout.halfWidth - 0.15, position.x))
+        position.y = max(-FieldLayout.halfLength + 0.15,
+                         min(FieldLayout.halfLength - 0.15, position.y))
     }
 
     var hasReachedTarget: Bool {
-        guard let target = targetPosition else { return false }
+        guard let target = currentGoal else { return false }
         return distance2D(position, target) < 0.2
     }
 
@@ -340,9 +377,9 @@ class RobotAgent {
         node.eulerAngles.y = heading
 
         // Animate wheels proportional to speed
-        let spinRate = speed * 3.0  // radians per second visual
+        let spinRate = speed * 3.0
         for wheel in wheelNodes {
-            wheel.eulerAngles.x += spinRate * (1.0 / 30.0)  // ~30fps tick
+            wheel.eulerAngles.x += spinRate * (1.0 / 30.0)
         }
 
         // Animate intake roller when picking up
@@ -353,19 +390,17 @@ class RobotAgent {
         // Animate mechanism during scoring
         if state == .scoring, let mech = mechanismNode {
             if mech.name == "elevator_stage" {
-                // Extend elevator upward based on target level
+                // Extend elevator based on target zone height
                 let targetY: Float
-                switch currentTargetLevel {
-                case 1: targetY = 0.08   // base position
-                case 2: targetY = 0.14
-                case 3: targetY = 0.22
-                default: targetY = 0.30  // L4 full extension
+                if let zone = currentTargetZone {
+                    targetY = zone.height.sceneHeight * 0.25
+                } else {
+                    targetY = 0.14
                 }
-                let baseY = config.build.mechanism == .elevator ? Float(0.08) : Float(0.08)
+                let baseY: Float = 0.08
                 mech.position.y += (targetY + baseY - mech.position.y) * 0.08
             } else if mech.name == "pivot_arm" {
-                // Tilt arm forward during scoring
-                let targetAngle: Float = -0.4  // tilt forward
+                let targetAngle: Float = -0.4
                 mech.eulerAngles.x += (targetAngle - mech.eulerAngles.x) * 0.06
             }
         } else if let mech = mechanismNode {
@@ -398,13 +433,16 @@ final class MatchEngine: ObservableObject {
     @Published var robotStates: [Int: RobotState] = [:]
     @Published var currentTip: CoachingTip?
     @Published var isSlowMo: Bool = false
-    @Published var activeCallouts: Set<Callout> = []  // Currently active callouts
-    @Published var calloutCooldown: Double = 0        // Seconds until next callout available
+    @Published var activeCallouts: Set<Callout> = []
+    @Published var calloutCooldown: Double = 0
 
     let configs: [RobotConfig]
+    let game: GeneratedGame
     let playerAutoPlan: AutoPlan
+    let playerStrategy: AllianceStrategy
     var redPolicy: StrategyPolicy
-    let bluePolicy = StrategyPolicy(scoringWeight: 0.6, defenseWeight: 0.2, endgameWeight: 0.2)
+    let bluePolicy = StrategyPolicy(scoringWeight: 0.6, defenseWeight: 0.2,
+                                     endgameWeight: 0.2)
 
     var agents: [RobotAgent] = []
     var rng: SeededRNG
@@ -415,24 +453,27 @@ final class MatchEngine: ObservableObject {
     private var slowMoUsed: Bool = false
     private var lastUpdateTime: Date?
     private var scene: SCNScene?
-    private var reefNodeTargets: [SCNNode] = []
+    private var zoneNodes: [Int: SCNNode] = [:]
 
-    init(configs: [RobotConfig], strategy: AllianceStrategy, playerAuto: AutoPlan, seed: UInt64 = 42) {
+    init(configs: [RobotConfig], strategy: AllianceStrategy, playerAuto: AutoPlan,
+         game: GeneratedGame, seed: UInt64 = 42) {
         self.configs = configs
+        self.game = game
         self.playerAutoPlan = playerAuto
+        self.playerStrategy = strategy
         self.redPolicy = strategy.basePolicy
         self.rng = SeededRNG(seed: seed)
 
         for config in configs {
-            agents.append(RobotAgent(config: config))
+            agents.append(RobotAgent(config: config, game: game))
         }
     }
 
     // MARK: - Scene Binding
 
-    func attach(scene: SCNScene, robotNodes: [SCNNode], reefNodes: [SCNNode]) {
+    func attach(scene: SCNScene, robotNodes: [SCNNode], zoneNodes: [Int: SCNNode]) {
         self.scene = scene
-        self.reefNodeTargets = reefNodes
+        self.zoneNodes = zoneNodes
         for (i, agent) in agents.enumerated() where i < robotNodes.count {
             agent.sceneNode = robotNodes[i]
             agent.cacheComponentNodes()
@@ -453,7 +494,8 @@ final class MatchEngine: ObservableObject {
         lastUpdateTime = Date()
         strategyMode = redPolicy.dominantMode
 
-        updateTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0,
+                                            repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.tick()
             }
@@ -475,7 +517,7 @@ final class MatchEngine: ObservableObject {
         return !activeCallouts.contains(callout)
     }
 
-    /// Legacy computed property for basic "any callout available" check.
+    /// Computed property for basic "any callout available" check.
     var canUseAnyCallout: Bool {
         guard isRunning, !isFinished, calloutCooldown <= 0 else { return false }
         return Callout.allCases.contains { canUseCallout($0) }
@@ -508,53 +550,60 @@ final class MatchEngine: ObservableObject {
         let redAgents = agents.filter { $0.config.alliance == .red && !$0.isParkedEndgame }
 
         switch callout {
-        case .prioritizeReef:
-            // All red agents re-evaluate goals → prioritize scoring
-            for agent in redAgents where agent.state == .idle || agent.state == .driving || agent.state == .defending {
-                agent.state = .idle  // Force re-goal with new policy
+        case .pushScoring:
+            // All red agents re-evaluate goals with boosted scoring weight
+            for agent in redAgents where agent.state == .idle
+                || agent.state == .driving || agent.state == .defending {
+                agent.state = .idle
             }
 
-        case .switchDefense:
-            // Find best candidate to switch to defense (non-defender that isn't carrying a piece)
+        case .playDefense:
+            // Find best candidate to switch to defense
             if let candidate = redAgents.first(where: {
                 $0.config.role != .defender && !$0.hasPiece && $0.config.id != 0
                 && ($0.state == .idle || $0.state == .driving)
             }) {
-                // Immediately set to defending
-                let opponents = agents.filter { $0.config.alliance == .blue && !$0.isParkedEndgame }
-                if let target = opponents.max(by: { $0.piecesScored < $1.piecesScored }) {
-                    let theirReef = FieldSpec.blueReefCenter
-                    candidate.targetPosition = SIMD2<Float>(
-                        target.position.x * 0.6 + theirReef.x * 0.4,
-                        target.position.y * 0.6 + theirReef.y * 0.4
+                let opponents = agents.filter {
+                    $0.config.alliance == .blue && !$0.isParkedEndgame
+                }
+                if let target = opponents.max(by: {
+                    $0.piecesScored < $1.piecesScored
+                }) {
+                    let blueZones = game.blueZones
+                    let zoneCenter = candidate.zoneCentroid(blueZones)
+                    candidate.currentGoal = SIMD2<Float>(
+                        target.position.x * 0.6 + zoneCenter.x * 0.4,
+                        target.position.y * 0.6 + zoneCenter.y * 0.4
                     )
                     candidate.state = .defending
                 }
             }
 
-        case .endgameEarly:
+        case .endgameNow:
             // All red agents head to endgame positions immediately
-            for agent in redAgents where !agent.isParkedEndgame && agent.state != .climbing {
-                agent.targetPosition = FieldLayout.redBarge
+            for agent in redAgents where !agent.isParkedEndgame
+                && agent.state != .climbing {
+                agent.currentGoal = FieldLayout.endgameRedPos
                 agent.state = .headingEndgame
             }
 
         case .focusHigh:
             // Scorers re-evaluate to pick higher targets
-            for agent in redAgents where (agent.state == .idle || agent.state == .driving) {
-                agent.state = .idle  // Force re-goal with preferHighLevel
+            for agent in redAgents where agent.state == .idle
+                || agent.state == .driving {
+                agent.state = .idle
             }
 
         case .spreadOut:
-            // Reset lastFaceUsed so all agents pick new faces
+            // Reset lastZoneId so all agents pick new zones
             for agent in redAgents {
-                agent.lastFaceUsed = -1
+                agent.lastZoneId = -1
                 if agent.state == .idle || agent.state == .driving {
-                    agent.state = .idle  // Force re-goal
+                    agent.state = .idle
                 }
             }
 
-        case .allOutAttack:
+        case .allOut:
             // Defenders switch to scoring, everyone re-evaluates
             for agent in redAgents {
                 if agent.state == .defending {
@@ -668,10 +717,12 @@ final class MatchEngine: ObservableObject {
         }
 
         if agent.state == .idle || (agent.state == .driving && agent.hasReachedTarget) {
-            agent.decideGoal(simTime: simTime, policy: policy, allAgents: agents, rng: &rng)
+            agent.decideGoal(simTime: simTime, policy: policy,
+                             allAgents: agents, rng: &rng)
         }
 
-        if agent.state == .driving || agent.state == .defending || agent.state == .headingEndgame {
+        if agent.state == .driving || agent.state == .defending
+            || agent.state == .headingEndgame {
             agent.updateMovement(dt: dt)
             if agent.hasReachedTarget {
                 handleArrival(agent)
@@ -685,19 +736,26 @@ final class MatchEngine: ObservableObject {
         let isPlayer = agent.config.id == 0
         let autoPlan = isPlayer ? playerAutoPlan : .moderate
 
+        let zones = agent.reachableZones.isEmpty ? agent.allianceZones : agent.reachableZones
+        guard !zones.isEmpty else {
+            agent.state = .idle
+            agent.autoPhase = 99
+            return
+        }
+
         switch agent.autoPhase {
         case 0:
+            // Pre-loaded piece, head to first scoring zone
             agent.state = .autoPath
             agent.hasPiece = true
-            let faceIdx = agent.config.id % 6
-            let approach = agent.config.alliance == .red
-                ? FieldLayout.redReefApproach(faceIdx)
-                : FieldLayout.blueReefApproach(faceIdx)
-            agent.targetPosition = approach
-            agent.currentTargetLevel = min(agent.config.stats.maxReefLevel, 2)
+            let zoneIdx = agent.config.id % zones.count
+            let targetZone = zones[zoneIdx]
+            agent.currentGoal = targetZone.position
+            agent.currentTargetZone = targetZone
             agent.autoPhase = 1
 
         case 1:
+            // Drive to first zone
             agent.updateMovement(dt: dt)
             checkAutoLine(agent)
             if agent.hasReachedTarget && agent.hasPiece {
@@ -712,11 +770,17 @@ final class MatchEngine: ObservableObject {
             }
 
         case 2:
+            // After first score: head to pickup if more pieces planned
             if autoPlan.piecesAttempted > 1 {
-                var source = agent.config.alliance == .red
-                    ? FieldLayout.redSource : FieldLayout.blueSource
-                source.y += Float(agent.config.id % 3) * 0.25 - 0.25
-                agent.targetPosition = source
+                let stations = agent.alliancePickups
+                if let nearest = stations.min(by: {
+                    distance2D(agent.position, $0.position)
+                        < distance2D(agent.position, $1.position)
+                }) {
+                    var pickupPos = nearest.position
+                    pickupPos.y += Float(agent.config.id % 3) * 0.25 - 0.25
+                    agent.currentGoal = pickupPos
+                }
                 agent.state = .autoPath
                 agent.autoPhase = 3
             } else {
@@ -725,21 +789,23 @@ final class MatchEngine: ObservableObject {
             }
 
         case 3:
+            // Drive to pickup station
             agent.updateMovement(dt: dt)
             checkAutoLine(agent)
             if agent.hasReachedTarget {
                 agent.hasPiece = true
                 agent.piecesCycled += 1
-                let faceIdx = (agent.config.id + 3) % 6
-                agent.targetPosition = agent.config.alliance == .red
-                    ? FieldLayout.redReefApproach(faceIdx)
-                    : FieldLayout.blueReefApproach(faceIdx)
-                agent.currentTargetLevel = 1
+                // Pick a different zone for the second scoring attempt
+                let zoneIdx = (agent.config.id + zones.count / 2) % zones.count
+                let targetZone = zones[zoneIdx]
+                agent.currentGoal = targetZone.position
+                agent.currentTargetZone = targetZone
                 agent.state = .autoPath
                 agent.autoPhase = 4
             }
 
         case 4:
+            // Drive to second zone and score
             agent.updateMovement(dt: dt)
             if agent.hasReachedTarget && agent.hasPiece {
                 if isPlayer && rng.nextDouble() > autoPlan.successRate {
@@ -753,28 +819,35 @@ final class MatchEngine: ObservableObject {
             }
 
         case 5:
-            var source = agent.config.alliance == .red
-                ? FieldLayout.redSource : FieldLayout.blueSource
-            source.y += Float(agent.config.id % 2) * 0.3
-            agent.targetPosition = source
+            // Head to pickup for third piece
+            let stations = agent.alliancePickups
+            if let nearest = stations.min(by: {
+                distance2D(agent.position, $0.position)
+                    < distance2D(agent.position, $1.position)
+            }) {
+                var pickupPos = nearest.position
+                pickupPos.y += Float(agent.config.id % 2) * 0.3
+                agent.currentGoal = pickupPos
+            }
             agent.state = .autoPath
             agent.autoPhase = 6
 
         case 6:
+            // Drive to pickup
             agent.updateMovement(dt: dt)
             if agent.hasReachedTarget {
                 agent.hasPiece = true
                 agent.piecesCycled += 1
-                let faceIdx = (agent.config.id + 1) % 6
-                agent.targetPosition = agent.config.alliance == .red
-                    ? FieldLayout.redReefApproach(faceIdx)
-                    : FieldLayout.blueReefApproach(faceIdx)
-                agent.currentTargetLevel = 1
+                let zoneIdx = (agent.config.id + 1) % zones.count
+                let targetZone = zones[zoneIdx]
+                agent.currentGoal = targetZone.position
+                agent.currentTargetZone = targetZone
                 agent.state = .autoPath
                 agent.autoPhase = 7
             }
 
         case 7:
+            // Drive to third zone and score
             agent.updateMovement(dt: dt)
             if agent.hasReachedTarget && agent.hasPiece {
                 if isPlayer && rng.nextDouble() > autoPlan.successRate * 0.7 {
@@ -798,14 +871,14 @@ final class MatchEngine: ObservableObject {
         guard !agent.hasCrossedAutoLine else { return }
         let crossed: Bool
         if agent.config.alliance == .red {
-            crossed = agent.position.x < FieldSpec.redAutoLine
+            crossed = agent.position.x < FieldLayout.redAutoLine
         } else {
-            crossed = agent.position.x > FieldSpec.blueAutoLine
+            crossed = agent.position.x > FieldLayout.blueAutoLine
         }
         if crossed {
             agent.hasCrossedAutoLine = true
             addScore(alliance: agent.config.alliance,
-                     points: FieldSpec.Scoring.autoLeave, period: .auto)
+                     points: game.autoLeavePoints, period: .auto)
         }
     }
 
@@ -814,8 +887,15 @@ final class MatchEngine: ObservableObject {
     private func handleArrival(_ agent: RobotAgent) {
         if agent.state == .headingEndgame {
             agent.state = .climbing
-            // Deep climb takes longer but worth more
-            agent.actionTimer = agent.config.stats.canDeepClimb ? 5.0 : 3.0
+            // Timer based on endgame challenge type
+            switch game.endgameChallenge {
+            case .climb(let difficulty, _):
+                agent.actionTimer = difficulty.climbTime
+            case .balance:
+                agent.actionTimer = 3.0
+            case .park:
+                agent.actionTimer = 1.0
+            }
             return
         }
 
@@ -824,7 +904,7 @@ final class MatchEngine: ObservableObject {
             return
         }
 
-        if !agent.hasPiece && isNearSource(agent) {
+        if !agent.hasPiece && isNearPickup(agent) {
             if rng.nextDouble() > agent.config.stats.reliability {
                 triggerStall(agent, duration: 2.0)
                 return
@@ -834,39 +914,44 @@ final class MatchEngine: ObservableObject {
             return
         }
 
-        if agent.hasPiece && isNearScoringTarget(agent) {
-            // Scoring attempt — ring physics in completeAction determines hit/miss
+        if agent.hasPiece, let zone = nearestReachableZone(for: agent) {
+            agent.currentTargetZone = zone
             agent.state = .scoring
             agent.actionTimer = agent.config.stats.scoringTime
-            pulseNearestReefNode(to: agent.position)
+            pulseZoneNode(zoneId: zone.id)
             return
         }
 
         agent.state = .idle
     }
 
-    private func isNearSource(_ agent: RobotAgent) -> Bool {
-        if agent.config.alliance == .red {
-            let d1 = distance2D(agent.position, SIMD2(FieldSpec.redCoralNear.x, FieldSpec.redCoralNear.y))
-            let d2 = distance2D(agent.position, SIMD2(FieldSpec.redCoralFar.x, FieldSpec.redCoralFar.y))
-            return min(d1, d2) < 0.8
-        } else {
-            let d1 = distance2D(agent.position, SIMD2(FieldSpec.blueCoralNear.x, FieldSpec.blueCoralNear.y))
-            let d2 = distance2D(agent.position, SIMD2(FieldSpec.blueCoralFar.x, FieldSpec.blueCoralFar.y))
-            return min(d1, d2) < 0.8
+    private func isNearPickup(_ agent: RobotAgent) -> Bool {
+        let stations = game.pickupStations.filter {
+            $0.alliance == agent.config.alliance
+        }
+        return stations.contains {
+            distance2D(agent.position, $0.position) < 0.6
         }
     }
 
-    private func isNearScoringTarget(_ agent: RobotAgent) -> Bool {
-        let reefCenter = agent.config.alliance == .red
-            ? FieldSpec.redReefCenter : FieldSpec.blueReefCenter
-        for face in 0..<6 {
-            let approach = FieldSpec.scoringApproach(center: reefCenter, faceIndex: face)
-            if distance2D(agent.position, approach) < 0.4 { return true }
+    /// Returns a nearby scoring zone the agent can reach (height-wise).
+    private func nearestReachableZone(for agent: RobotAgent) -> ScoringZone? {
+        let zones = game.scoringZones.filter {
+            $0.alliance == agent.config.alliance
+            && $0.height <= agent.config.stats.maxReachHeight
         }
-        let proc = agent.config.alliance == .red
-            ? FieldLayout.redProcessor : FieldLayout.blueProcessor
-        return distance2D(agent.position, proc) < 0.5
+        return zones.first { distance2D(agent.position, $0.position) < 0.5 }
+    }
+
+    /// Returns nearest alliance zone regardless of height (for visuals/fallback).
+    private func nearestAllianceZone(for agent: RobotAgent) -> ScoringZone? {
+        let zones = game.scoringZones.filter {
+            $0.alliance == agent.config.alliance
+        }
+        return zones.min {
+            distance2D(agent.position, $0.position)
+                < distance2D(agent.position, $1.position)
+        }
     }
 
     // MARK: - Action Completion
@@ -884,50 +969,55 @@ final class MatchEngine: ObservableObject {
                 agent.piecesScored += 1
 
                 let isAuto = period == .auto
-                let isProcessor = isNearProcessor(agent)
-                let level = agent.currentTargetLevel
 
-                // Determine scoring success for ring physics
+                // Determine scoring success based on reliability
                 let scoringSuccess = rng.nextDouble() <= agent.config.stats.reliability
 
-                if isProcessor {
-                    if scoringSuccess {
-                        let pts = isAuto ? FieldSpec.Scoring.autoProcessor : FieldSpec.Scoring.teleopProcessor
-                        addScore(alliance: agent.config.alliance, points: pts,
-                                 period: isAuto ? .auto : .teleop, isProcessor: true)
-                    }
-                    // Processor doesn't show ring arc
-                } else {
-                    // Compute target position for ring projectile
-                    let reefCenter = agent.config.alliance == .red
-                        ? FieldSpec.redReefCenter : FieldSpec.blueReefCenter
-                    let face = agent.lastFaceUsed >= 0 ? agent.lastFaceUsed : 0
-                    let targetPos = FieldSpec.scoringApproach(center: reefCenter, faceIndex: face)
+                // Find the zone being scored at
+                let zone = agent.currentTargetZone
+                    ?? nearestReachableZone(for: agent)
+                    ?? nearestAllianceZone(for: agent)
 
-                    // Spawn visual ring projectile
-                    spawnRingProjectile(
-                        from: agent.position, to: targetPos,
-                        level: level, success: scoringSuccess
+                if let zone = zone {
+                    let targetHeight = zone.height
+
+                    // Spawn visual projectile
+                    spawnProjectile(
+                        from: agent.position, to: zone.position,
+                        height: targetHeight, success: scoringSuccess
                     )
 
                     if scoringSuccess {
-                        let pts = scoringPoints(level: level, isAuto: isAuto)
-                        addScore(alliance: agent.config.alliance, points: pts,
-                                 period: isAuto ? .auto : .teleop, reefLevel: level)
+                        let pts = isAuto ? zone.pointsAuto : zone.pointsTeleop
+                        addScore(
+                            alliance: agent.config.alliance, points: pts,
+                            period: isAuto ? .auto : .teleop,
+                            height: targetHeight
+                        )
                     }
                 }
             }
             agent.state = .idle
 
         case .climbing:
-            // Award endgame points based on climb type
-            let pts: Int
-            if agent.config.stats.canDeepClimb {
-                pts = FieldSpec.Scoring.deepClimb
-            } else {
-                pts = FieldSpec.Scoring.shallowClimb
+            // Award endgame points based on challenge type
+            switch game.endgameChallenge {
+            case .climb(let difficulty, let pts):
+                // Only canDeepClimb robots get full points on high difficulty
+                if difficulty == .high && !agent.config.stats.canDeepClimb {
+                    addScore(alliance: agent.config.alliance,
+                             points: pts / 2, period: .endgame)
+                } else {
+                    addScore(alliance: agent.config.alliance,
+                             points: pts, period: .endgame)
+                }
+            case .balance(let pts):
+                addScore(alliance: agent.config.alliance,
+                         points: pts, period: .endgame)
+            case .park(let pts):
+                addScore(alliance: agent.config.alliance,
+                         points: pts, period: .endgame)
             }
-            addScore(alliance: agent.config.alliance, points: pts, period: .endgame)
             agent.isParkedEndgame = true
             agent.state = .parked
 
@@ -939,34 +1029,10 @@ final class MatchEngine: ObservableObject {
         }
     }
 
-    private func scoringPoints(level: Int, isAuto: Bool) -> Int {
-        if isAuto {
-            switch level {
-            case 1: return FieldSpec.Scoring.autoCoralL1
-            case 2: return FieldSpec.Scoring.autoCoralL2
-            case 3: return FieldSpec.Scoring.autoCoralL3
-            default: return FieldSpec.Scoring.autoCoralL4
-            }
-        } else {
-            switch level {
-            case 1: return FieldSpec.Scoring.teleopCoralL1
-            case 2: return FieldSpec.Scoring.teleopCoralL2
-            case 3: return FieldSpec.Scoring.teleopCoralL3
-            default: return FieldSpec.Scoring.teleopCoralL4
-            }
-        }
-    }
-
-    private func isNearProcessor(_ agent: RobotAgent) -> Bool {
-        let proc = agent.config.alliance == .red
-            ? FieldLayout.redProcessor : FieldLayout.blueProcessor
-        return distance2D(agent.position, proc) < 0.5
-    }
-
     // MARK: - Scoring
 
     private func addScore(alliance: Alliance, points: Int, period: MatchPeriod,
-                          isProcessor: Bool = false, reefLevel: Int = 0) {
+                          height: ScoringHeight? = nil) {
         if alliance == .red {
             redScore += points
             switch period {
@@ -974,15 +1040,13 @@ final class MatchEngine: ObservableObject {
             case .endgame: redBreakdown.endgamePoints += points
             default:       redBreakdown.teleopPoints += points
             }
-            if reefLevel > 0 || isProcessor {
+            if let h = height {
                 redBreakdown.totalPieces += 1
-                if isProcessor { redBreakdown.processorPieces += 1 }
-                switch reefLevel {
-                case 1: redBreakdown.coralL1 += 1
-                case 2: redBreakdown.coralL2 += 1
-                case 3: redBreakdown.coralL3 += 1
-                case 4: redBreakdown.coralL4 += 1
-                default: break
+                switch h {
+                case .ground: redBreakdown.groundScores += 1
+                case .low:    redBreakdown.lowScores += 1
+                case .mid:    redBreakdown.midScores += 1
+                case .high:   redBreakdown.highScores += 1
                 }
             }
         } else {
@@ -992,15 +1056,13 @@ final class MatchEngine: ObservableObject {
             case .endgame: blueBreakdown.endgamePoints += points
             default:       blueBreakdown.teleopPoints += points
             }
-            if reefLevel > 0 || isProcessor {
+            if let h = height {
                 blueBreakdown.totalPieces += 1
-                if isProcessor { blueBreakdown.processorPieces += 1 }
-                switch reefLevel {
-                case 1: blueBreakdown.coralL1 += 1
-                case 2: blueBreakdown.coralL2 += 1
-                case 3: blueBreakdown.coralL3 += 1
-                case 4: blueBreakdown.coralL4 += 1
-                default: break
+                switch h {
+                case .ground: blueBreakdown.groundScores += 1
+                case .low:    blueBreakdown.lowScores += 1
+                case .mid:    blueBreakdown.midScores += 1
+                case .high:   blueBreakdown.highScores += 1
                 }
             }
         }
@@ -1034,7 +1096,7 @@ final class MatchEngine: ObservableObject {
                     let pushI = agents[i].config.stats.pushPower
                     let pushJ = agents[j].config.stats.pushPower
                     let totalPush = max(0.1, pushI + pushJ)
-                    let ratioI = pushJ / totalPush  // i moves proportional to j's push
+                    let ratioI = pushJ / totalPush
                     let ratioJ = pushI / totalPush
 
                     agents[i].position.x -= nx * overlap * 2 * ratioI
@@ -1043,7 +1105,8 @@ final class MatchEngine: ObservableObject {
                     agents[j].position.y += nz * overlap * 2 * ratioJ
 
                     // Defenders slow opponents on contact
-                    let isOpposing = agents[i].config.alliance != agents[j].config.alliance
+                    let isOpposing = agents[i].config.alliance
+                        != agents[j].config.alliance
                     if isOpposing {
                         if agents[i].config.role == .defender {
                             agents[j].speed *= 0.3
@@ -1065,19 +1128,8 @@ final class MatchEngine: ObservableObject {
 
     // MARK: - Visual Feedback
 
-    private func pulseNearestReefNode(to pos: SIMD2<Float>) {
-        var closestNode: SCNNode?
-        var closestDist: Float = .greatestFiniteMagnitude
-        for node in reefNodeTargets {
-            let dx = node.position.x - pos.x
-            let dz = node.position.z - pos.y
-            let dist = sqrt(dx * dx + dz * dz)
-            if dist < closestDist {
-                closestDist = dist
-                closestNode = node
-            }
-        }
-        guard let target = closestNode else { return }
+    private func pulseZoneNode(zoneId: Int) {
+        guard let target = zoneNodes[zoneId] else { return }
 
         let up = SCNAction.scale(to: 1.3, duration: 0.12)
         let down = SCNAction.scale(to: 1.0, duration: 0.25)
@@ -1092,29 +1144,23 @@ final class MatchEngine: ObservableObject {
         }
     }
 
-    // MARK: - Ring Projectile Physics
+    // MARK: - Projectile Physics
 
-    /// Spawn a game piece ring that arcs toward the scoring target.
-    /// On success: ring lands on the tower and stays.
-    /// On miss: ring arcs off-target, falls with gravity, bounces, and fades out.
-    private func spawnRingProjectile(from agentPos: SIMD2<Float>, to targetPos: SIMD2<Float>,
-                                      level: Int, success: Bool) {
+    /// Spawn a game piece that arcs toward the scoring target.
+    /// On success: piece lands on the target and stays.
+    /// On miss: piece arcs off-target, falls with gravity, bounces, and fades out.
+    private func spawnProjectile(from agentPos: SIMD2<Float>, to targetPos: SIMD2<Float>,
+                                  height: ScoringHeight, success: Bool) {
         guard let scene = scene else { return }
 
-        let ring = FieldBuilder.makeRingProjectile()
-        let startPos = SCNVector3(agentPos.x, 0.18, agentPos.y)  // robot top height
-        ring.position = startPos
-        ring.scale = SCNVector3(0.8, 0.8, 0.8)
-        scene.rootNode.addChildNode(ring)
+        let pieceKind = game.gamePieces.first ?? .ball
+        let piece = FieldBuilder.makeGamePiece(kind: pieceKind)
+        let startPos = SCNVector3(agentPos.x, 0.18, agentPos.y)
+        piece.position = startPos
+        piece.scale = SCNVector3(0.8, 0.8, 0.8)
+        scene.rootNode.addChildNode(piece)
 
-        // Target height based on level
-        let targetHeight: Float
-        switch level {
-        case 1: targetHeight = FieldSpec.troughL1 + 0.06
-        case 2: targetHeight = FieldSpec.branchL2 + 0.02
-        case 3: targetHeight = FieldSpec.branchL3 + 0.02
-        default: targetHeight = FieldSpec.branchL4 + 0.02
-        }
+        let targetHeight = height.sceneHeight
 
         if success {
             // Parabolic arc to target (quadratic bezier)
@@ -1130,9 +1176,12 @@ final class MatchEngine: ObservableObject {
             let arc = SCNAction.customAction(duration: duration) { node, elapsed in
                 let t = Float(elapsed / duration)
                 let inv = 1 - t
-                node.position.x = inv * inv * startPos.x + 2 * inv * t * midPos.x + t * t * endPos.x
-                node.position.y = inv * inv * startPos.y + 2 * inv * t * midPos.y + t * t * endPos.y
-                node.position.z = inv * inv * startPos.z + 2 * inv * t * midPos.z + t * t * endPos.z
+                node.position.x = inv * inv * startPos.x
+                    + 2 * inv * t * midPos.x + t * t * endPos.x
+                node.position.y = inv * inv * startPos.y
+                    + 2 * inv * t * midPos.y + t * t * endPos.y
+                node.position.z = inv * inv * startPos.z
+                    + 2 * inv * t * midPos.z + t * t * endPos.z
                 // Spin during flight
                 node.eulerAngles.z += 0.15
             }
@@ -1143,12 +1192,12 @@ final class MatchEngine: ObservableObject {
                 SCNAction.scale(to: 0.85, duration: 0.15)
             ])
 
-            ring.runAction(SCNAction.sequence([arc, land]))
+            piece.runAction(SCNAction.sequence([arc, land]))
         } else {
             // Miss: offset target, arc, then fall and bounce
-            let missX = targetPos.x + (Float.random(in: -0.2...0.2))
-            let missZ = targetPos.y + (Float.random(in: -0.2...0.2))
-            let overshootH = targetHeight * 0.65  // doesn't reach full height
+            let missX = targetPos.x + Float.random(in: -0.2...0.2)
+            let missZ = targetPos.y + Float.random(in: -0.2...0.2)
+            let overshootH = targetHeight * 0.65
             let midY = max(overshootH + 0.15, 0.4)
             let missEnd = SCNVector3(missX, overshootH, missZ)
             let midPos = SCNVector3(
@@ -1162,9 +1211,12 @@ final class MatchEngine: ObservableObject {
             let arc = SCNAction.customAction(duration: arcDuration) { node, elapsed in
                 let t = Float(elapsed / arcDuration)
                 let inv = 1 - t
-                node.position.x = inv * inv * startPos.x + 2 * inv * t * midPos.x + t * t * missEnd.x
-                node.position.y = inv * inv * startPos.y + 2 * inv * t * midPos.y + t * t * missEnd.y
-                node.position.z = inv * inv * startPos.z + 2 * inv * t * midPos.z + t * t * missEnd.z
+                node.position.x = inv * inv * startPos.x
+                    + 2 * inv * t * midPos.x + t * t * missEnd.x
+                node.position.y = inv * inv * startPos.y
+                    + 2 * inv * t * midPos.y + t * t * missEnd.y
+                node.position.z = inv * inv * startPos.z
+                    + 2 * inv * t * midPos.z + t * t * missEnd.z
                 node.eulerAngles.z += 0.2
             }
 
@@ -1189,7 +1241,7 @@ final class MatchEngine: ObservableObject {
             let fade = SCNAction.fadeOut(duration: 1.0)
             let remove = SCNAction.removeFromParentNode()
 
-            ring.runAction(SCNAction.sequence([
+            piece.runAction(SCNAction.sequence([
                 arc, fall, bounce, settle, bounce2, settle2,
                 SCNAction.wait(duration: 0.3),
                 fade, remove
@@ -1200,22 +1252,33 @@ final class MatchEngine: ObservableObject {
     // MARK: - Coaching Tips
 
     private func generateCoachingTip() {
+        let endgameDesc: String = {
+            switch game.endgameChallenge {
+            case .climb(let d, let p): return "\(d.rawValue) climb (\(p)pts)"
+            case .balance(let p):      return "balance (\(p)pts)"
+            case .park(let p):         return "park (\(p)pts)"
+            }
+        }()
+
         let tips: [() -> CoachingTip?] = [
             { [self] in
-                let defenders = agents.filter { $0.config.role == .defender && $0.state == .defending }
+                let defenders = agents.filter {
+                    $0.config.role == .defender && $0.state == .defending
+                }
                 guard let def = defenders.first else { return nil }
                 return CoachingTip(
                     headline: "Defense in Action",
-                    detail: "Notice how #\(def.config.teamNumber) positions between opponents and their tower. Their \(def.config.build.drivetrain.shortLabel) drive gives them \(def.config.stats.canDeepClimb ? "deep climb (12pts)" : "speed advantage") in endgame.",
+                    detail: "Notice how #\(def.config.teamNumber) positions between opponents and their scoring zones. Their \(def.config.build.drivetrain.shortLabel) drive gives them \(def.config.stats.canDeepClimb ? "deep climb ability" : "speed advantage") for endgame.",
                     highlightRobotId: def.config.id
                 )
             },
             { [self] in
                 let scorers = agents.filter { $0.state == .scoring }
                 guard let s = scorers.first else { return nil }
+                let maxHeight = s.config.stats.maxReachHeight.displayName
                 return CoachingTip(
                     headline: "Scoring Cycle",
-                    detail: "Team \(s.config.teamNumber)'s \(s.config.build.mechanism.shortLabel) mechanism takes ~\(String(format: "%.1f", s.config.stats.scoringTime))s per score (max L\(s.config.stats.maxReefLevel)). \(s.config.build.intake.shortLabel) intake picks up in \(String(format: "%.1f", s.config.stats.pickupTime))s.",
+                    detail: "Team \(s.config.teamNumber)'s \(s.config.build.manipulator.shortLabel) scores in ~\(String(format: "%.1f", s.config.stats.scoringTime))s (reaches \(maxHeight)). \(s.config.build.intake.shortLabel) intake picks up in \(String(format: "%.1f", s.config.stats.pickupTime))s.",
                     highlightRobotId: s.config.id
                 )
             },
@@ -1227,21 +1290,24 @@ final class MatchEngine: ObservableObject {
                 )
             },
             { [self] in
-                let topScorer = agents.filter { $0.config.alliance == .red }.max(by: { $0.piecesScored < $1.piecesScored })
+                let topScorer = agents.filter { $0.config.alliance == .red }
+                    .max(by: { $0.piecesScored < $1.piecesScored })
                 guard let t = topScorer, t.piecesScored > 0 else { return nil }
                 return CoachingTip(
                     headline: "Top Performer",
-                    detail: "Team \(t.config.teamNumber) leads with \(t.piecesScored) pieces. Their \(t.config.build.drivetrain.shortLabel)+\(t.config.build.mechanism.shortLabel)+\(t.config.build.intake.shortLabel) build \(t.config.stats.canDeepClimb ? "can deep climb!" : "is fast but shallow-climb only.").",
+                    detail: "Team \(t.config.teamNumber) leads with \(t.piecesScored) pieces. Their \(t.config.build.drivetrain.shortLabel)+\(t.config.build.manipulator.shortLabel)+\(t.config.build.intake.shortLabel) build \(t.config.stats.canDeepClimb ? "can deep climb!" : "focuses on speed.").",
                     highlightRobotId: t.config.id
                 )
             },
             { [self] in
                 let diff = redScore - blueScore
-                let comparison = diff > 0 ? "leading by \(diff)" : (diff < 0 ? "trailing by \(-diff)" : "tied")
+                let comparison = diff > 0
+                    ? "leading by \(diff)" : (diff < 0
+                    ? "trailing by \(-diff)" : "tied")
                 let timeLeft = Int(max(0, MatchTiming.totalDuration - simTime))
                 return CoachingTip(
                     headline: "Score Check",
-                    detail: "Your red alliance is \(comparison) with \(timeLeft)s left. Tank bots get deep climb (12pts) while swerve gets shallow (6pts) — big endgame swing!",
+                    detail: "Your red alliance is \(comparison) with \(timeLeft)s left. Endgame is \(endgameDesc) — make sure to plan your approach!",
                     highlightRobotId: nil
                 )
             },
@@ -1250,17 +1316,28 @@ final class MatchEngine: ObservableObject {
                 guard let c = cyclers.first else { return nil }
                 return CoachingTip(
                     headline: "Cycle Speed",
-                    detail: "Cycler #\(c.config.teamNumber) has \(c.piecesCycled) cycles using \(c.config.build.mechanism.shortLabel)+\(c.config.build.intake.shortLabel). Cyclers target L1-L2 for fast turnaround — fewer points per piece but more volume.",
+                    detail: "Cycler #\(c.config.teamNumber) has \(c.piecesCycled) cycles using \(c.config.build.manipulator.shortLabel)+\(c.config.build.intake.shortLabel). Cyclers target low zones for fast turnaround — fewer points per piece but more volume.",
                     highlightRobotId: c.config.id
                 )
             },
             { [self] in
-                // Build diversity tip
-                let builds = agents.map { "\($0.config.build.drivetrain.shortLabel)/\($0.config.build.mechanism.shortLabel)" }
+                let builds = agents.map {
+                    "\($0.config.build.drivetrain.shortLabel)/\($0.config.build.manipulator.shortLabel)"
+                }
                 let unique = Set(builds).count
+                let pieceNames = game.gamePieces.map(\.rawValue).joined(separator: " & ")
                 return CoachingTip(
                     headline: "Build Variety",
-                    detail: "There are \(unique) different build combos on the field. In real FRC, each team's robot is unique — some teams prioritize speed, others reliability or reach.",
+                    detail: "There are \(unique) different build combos on the field playing with \(pieceNames). In real FRC, each team's robot is unique — some prioritize speed, others reliability or reach.",
+                    highlightRobotId: nil
+                )
+            },
+            { [self] in
+                let maxZone = game.maxScoringHeight
+                let highZoneCount = game.redZones.filter { $0.height == maxZone }.count
+                return CoachingTip(
+                    headline: "Game Analysis",
+                    detail: "This game has \(highZoneCount) \(maxZone.displayName)-height targets per side. Robots need \(maxZone == .high ? "an Elevator" : maxZone == .mid ? "a Pivot Arm or Elevator" : "any manipulator") to reach them. The endgame is a \(endgameDesc).",
                     highlightRobotId: nil
                 )
             },
@@ -1276,7 +1353,7 @@ final class MatchEngine: ObservableObject {
 
         currentTip = CoachingTip(
             headline: "Watch the Field",
-            detail: "Pay attention to robot paths. Teams that avoid traffic jams and cycle efficiently score more. The hexagonal tower has 6 faces — spreading out prevents congestion!",
+            detail: "Pay attention to robot paths. Teams that avoid traffic jams and cycle efficiently score more. Spreading out across scoring zones prevents congestion!",
             highlightRobotId: nil
         )
     }
@@ -1295,9 +1372,8 @@ final class MatchEngine: ObservableObject {
     var result: MatchResult {
         let playerAgent = agents.first { $0.config.id == 0 }
         return MatchResult(
-            playerStrategy: AllianceStrategy.allCases.first {
-                $0.basePolicy.scoringWeight == redPolicy.scoringWeight
-            } ?? .balanced,
+            game: game,
+            playerStrategy: playerStrategy,
             playerRole: configs[0].role,
             playerAuto: playerAutoPlan,
             playerBuild: configs[0].build,
@@ -1311,7 +1387,8 @@ final class MatchEngine: ObservableObject {
             playerRobotCycled: playerAgent?.piecesCycled ?? 0,
             didPlayerStall: playerAgent?.didStall ?? false,
             matchDuration: simTime,
-            slowMoUsed: slowMoUsed
+            slowMoUsed: slowMoUsed,
+            buildMatchScore: game.buildMatchScore(build: configs[0].build)
         )
     }
 }

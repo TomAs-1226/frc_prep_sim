@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Intro View
 
-/// Quick welcome screen that explains the match coach concept and starts the flow.
+/// Welcome screen that introduces the Rookie Workshop concept and starts the flow.
 struct IntroView: View {
     let onStart: () -> Void
     @State private var appeared = false
@@ -23,18 +23,18 @@ struct IntroView: View {
 
                 // Title block
                 VStack(spacing: 10) {
-                    Image(systemName: "gamecontroller.fill")
+                    Image(systemName: "wrench.and.screwdriver.fill")
                         .font(.system(size: 54))
                         .foregroundStyle(.orange)
                         .scaleEffect(appeared ? 1 : 0.6)
                         .opacity(appeared ? 1 : 0)
                         .accessibilityHidden(true)
 
-                    Text("Match Coach")
+                    Text("Rookie Workshop")
                         .font(.system(size: 36, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
 
-                    Text("Inspired by FRC Reefscape")
+                    Text("FRC Robot Builder")
                         .font(.subheadline.bold())
                         .foregroundStyle(.orange.opacity(0.9))
                         .tracking(1)
@@ -42,14 +42,14 @@ struct IntroView: View {
 
                 // Step cards
                 VStack(spacing: 14) {
-                    stepCard(number: "1", title: "Pick a Strategy",
-                             detail: "Choose your alliance's approach: aggressive, balanced, or defensive.",
-                             icon: "lightbulb.fill", color: .orange)
-                    stepCard(number: "2", title: "Choose Your Role & Auto",
-                             detail: "Select your robot's role and autonomous routine.",
+                    stepCard(number: "1", title: "Analyze the Game",
+                             detail: "Each round generates a unique field with random scoring zones, game pieces, and endgame challenges.",
+                             icon: "magnifyingglass", color: .orange)
+                    stepCard(number: "2", title: "Build Your Robot",
+                             detail: "Pick the right parts for the game: drivetrain, frame, manipulator, and intake.",
                              icon: "wrench.and.screwdriver.fill", color: .cyan)
-                    stepCard(number: "3", title: "Watch the Match",
-                             detail: "6 robots compete. Use callouts and slow-mo to learn strategy.",
+                    stepCard(number: "3", title: "Compete & Learn",
+                             detail: "Watch your robot in a 3v3 match and see how well your build matched the game.",
                              icon: "play.fill", color: .green)
                 }
                 .padding(.horizontal, 24)
@@ -61,8 +61,8 @@ struct IntroView: View {
                 // Start button
                 Button(action: onStart) {
                     HStack(spacing: 10) {
-                        Image(systemName: "flag.checkered")
-                        Text("Start Match")
+                        Image(systemName: "hammer.fill")
+                        Text("Start Building")
                             .font(.headline)
                     }
                     .foregroundStyle(.black)
@@ -74,7 +74,7 @@ struct IntroView: View {
                     )
                     .modifier(GlassModifier(shape: RoundedRectangle(cornerRadius: 16)))
                 }
-                .accessibilityLabel("Start a new match")
+                .accessibilityLabel("Start building your robot")
                 .opacity(appeared ? 1 : 0)
 
                 Text("~3 minute experience")

@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Results View
 
-/// Post-match results with score breakdown, build choices, and AI coaching feedback.
+/// Post-match results with score breakdown, build match analysis, and AI coaching feedback.
 struct ResultsView: View {
     let result: MatchResult
     let onTryAgain: () -> Void
@@ -27,6 +27,12 @@ struct ResultsView: View {
                     headerSection
                         .padding(.top, 24)
 
+                    gameInfoSection
+                        .padding(.horizontal, 20)
+
+                    buildMatchSection
+                        .padding(.horizontal, 20)
+
                     scoreComparison
                         .padding(.horizontal, 20)
 
@@ -39,6 +45,9 @@ struct ResultsView: View {
                     choicesSection
                         .padding(.horizontal, 20)
 
+                    gameAnalysisSection
+                        .padding(.horizontal, 20)
+
                     decisionMapSection
                         .padding(.horizontal, 20)
 
@@ -48,7 +57,7 @@ struct ResultsView: View {
                     Button(action: onTryAgain) {
                         HStack(spacing: 8) {
                             Image(systemName: "arrow.counterclockwise")
-                            Text("Try Different Strategy")
+                            Text("Try New Game")
                                 .font(.headline)
                         }
                         .foregroundStyle(.black)
@@ -60,9 +69,9 @@ struct ResultsView: View {
                         )
                         .modifier(GlassModifier(shape: RoundedRectangle(cornerRadius: 14)))
                     }
-                    .accessibilityLabel("Try again with different strategy choices")
+                    .accessibilityLabel("Try again with a new procedurally generated game")
 
-                    Text("Demo Level 1 — future levels will be more in-depth")
+                    Text(result.game.name)
                         .font(.system(size: 9))
                         .foregroundStyle(.white.opacity(0.2))
                         .padding(.bottom, 40)
@@ -114,6 +123,127 @@ struct ResultsView: View {
         } else {
             return "Tough Match"
         }
+    }
+
+    // MARK: - Game Info
+
+    @ViewBuilder
+    private var gameInfoSection: some View {
+        HStack(spacing: 12) {
+            Image(systemName: result.game.archetype.icon)
+                .font(.title2)
+                .foregroundStyle(result.game.archetype.color)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(result.game.name)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                HStack(spacing: 6) {
+                    Text(result.game.archetype.rawValue)
+                        .font(.caption.bold())
+                        .foregroundStyle(result.game.archetype.color)
+                    Text(result.game.endgameChallenge.displayName)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+            }
+            Spacer()
+
+            // Game pieces
+            VStack(spacing: 2) {
+                HStack(spacing: 4) {
+                    ForEach(result.game.gamePieces, id: \.rawValue) { piece in
+                        Image(systemName: piece.icon)
+                            .font(.caption)
+                            .foregroundStyle(piece.color)
+                    }
+                }
+                Text("Pieces")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.white.opacity(0.35))
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(result.game.archetype.color.opacity(0.2), lineWidth: 1)
+                )
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Game: \(result.game.name), archetype: \(result.game.archetype.rawValue)")
+    }
+
+    // MARK: - Build Match Score
+
+    @ViewBuilder
+    private var buildMatchSection: some View {
+        VStack(spacing: 12) {
+            Text("BUILD MATCH SCORE")
+                .font(.caption.bold())
+                .foregroundStyle(.white.opacity(0.4))
+                .tracking(1)
+
+            // Gauge
+            ZStack {
+                Circle()
+                    .trim(from: 0, to: 0.75)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 10)
+                    .rotationEffect(.degrees(135))
+
+                Circle()
+                    .trim(from: 0, to: animateScore ? CGFloat(result.buildMatchScore) / 100.0 * 0.75 : 0)
+                    .stroke(buildMatchColor, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                    .rotationEffect(.degrees(135))
+                    .animation(.easeOut(duration: 1.0).delay(0.3), value: animateScore)
+
+                VStack(spacing: 2) {
+                    Text("\(result.buildMatchScore)")
+                        .font(.system(size: 36, weight: .black, design: .rounded))
+                        .foregroundStyle(buildMatchColor)
+                    Text("/ 100")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.4))
+                    Text(buildMatchLabel)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(buildMatchColor.opacity(0.8))
+                }
+            }
+            .frame(width: 140, height: 140)
+
+            Text("How well your robot parts matched the generated game")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.45))
+                .multilineTextAlignment(.center)
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(buildMatchColor.opacity(0.2), lineWidth: 1)
+                )
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Build match score: \(result.buildMatchScore) out of 100. \(buildMatchLabel).")
+    }
+
+    private var buildMatchColor: Color {
+        if result.buildMatchScore >= 75 { return .green }
+        if result.buildMatchScore >= 50 { return .yellow }
+        if result.buildMatchScore >= 30 { return .orange }
+        return .red
+    }
+
+    private var buildMatchLabel: String {
+        if result.buildMatchScore >= 80 { return "Excellent Fit" }
+        if result.buildMatchScore >= 65 { return "Good Fit" }
+        if result.buildMatchScore >= 50 { return "Decent Fit" }
+        if result.buildMatchScore >= 35 { return "Poor Fit" }
+        return "Mismatched"
     }
 
     // MARK: - Score Comparison
@@ -187,16 +317,13 @@ struct ResultsView: View {
                                 color: Color(red: 0.3, green: 0.5, blue: 1.0))
             }
 
-            // Coral level breakdown for red
+            // Scoring height breakdown for red
             if result.redBreakdown.totalPieces > 0 {
                 HStack(spacing: 12) {
-                    levelStat("L1", count: result.redBreakdown.coralL1, color: .green)
-                    levelStat("L2", count: result.redBreakdown.coralL2, color: .green)
-                    levelStat("L3", count: result.redBreakdown.coralL3, color: .yellow)
-                    levelStat("L4", count: result.redBreakdown.coralL4, color: .red)
-                    if result.redBreakdown.processorPieces > 0 {
-                        levelStat("Proc", count: result.redBreakdown.processorPieces, color: .cyan)
-                    }
+                    levelStat("Ground", count: result.redBreakdown.groundScores, color: .green)
+                    levelStat("Low", count: result.redBreakdown.lowScores, color: .cyan)
+                    levelStat("Mid", count: result.redBreakdown.midScores, color: .yellow)
+                    levelStat("High", count: result.redBreakdown.highScores, color: .red)
                 }
                 .padding(.top, 2)
             }
@@ -293,14 +420,17 @@ struct ResultsView: View {
                            color: result.playerAuto.color)
             }
 
-            // Robot build
+            // Robot build (with frame)
             HStack(spacing: 10) {
                 choiceChip(icon: result.playerBuild.drivetrain.icon,
                            label: result.playerBuild.drivetrain.shortLabel,
                            color: result.playerBuild.drivetrain.color)
-                choiceChip(icon: result.playerBuild.mechanism.icon,
-                           label: result.playerBuild.mechanism.shortLabel,
-                           color: result.playerBuild.mechanism.color)
+                choiceChip(icon: result.playerBuild.frame.icon,
+                           label: result.playerBuild.frame.shortLabel,
+                           color: result.playerBuild.frame.color)
+                choiceChip(icon: result.playerBuild.manipulator.icon,
+                           label: result.playerBuild.manipulator.shortLabel,
+                           color: result.playerBuild.manipulator.color)
                 choiceChip(icon: result.playerBuild.intake.icon,
                            label: result.playerBuild.intake.shortLabel,
                            color: result.playerBuild.intake.color)
@@ -326,6 +456,129 @@ struct ResultsView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .background(Capsule().fill(color.opacity(0.12)))
+    }
+
+    // MARK: - Game Analysis
+
+    @ViewBuilder
+    private var gameAnalysisSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("BUILD vs GAME ANALYSIS")
+                .font(.caption.bold())
+                .foregroundStyle(.white.opacity(0.4))
+                .tracking(1)
+
+            // Manipulator reach vs game heights
+            let maxZone = result.game.maxScoringHeight
+            let maxReach = result.playerBuild.manipulator.maxReach
+            analysisRow(
+                icon: result.playerBuild.manipulator.icon,
+                label: "Manipulator Reach",
+                detail: "\(result.playerBuild.manipulator.shortLabel) reaches \(maxReach.displayName) -- game needs \(maxZone.displayName)",
+                isGood: maxReach >= maxZone,
+                color: result.playerBuild.manipulator.color
+            )
+
+            // Intake vs game pieces
+            let intakeMatch = result.game.gamePieces.contains { $0.idealIntake == result.playerBuild.intake }
+            let pieceNames = result.game.gamePieces.map(\.rawValue).joined(separator: ", ")
+            analysisRow(
+                icon: result.playerBuild.intake.icon,
+                label: "Intake Match",
+                detail: "\(result.playerBuild.intake.shortLabel) for \(pieceNames)",
+                isGood: intakeMatch,
+                color: result.playerBuild.intake.color
+            )
+
+            // Endgame fit
+            let endgameFit: Bool
+            let endgameDetail: String
+            switch result.game.endgameChallenge {
+            case .climb(let difficulty, _):
+                if difficulty == .high {
+                    endgameFit = result.playerBuild.drivetrain.canDeepClimb
+                    endgameDetail = "High climb needs Tank Drive deep climb"
+                } else {
+                    endgameFit = true
+                    endgameDetail = "\(difficulty.rawValue) is accessible to all drivetrains"
+                }
+            case .balance:
+                endgameFit = result.playerBuild.drivetrain.canStrafe
+                endgameDetail = "Balance favors strafing (Swerve/Mecanum)"
+            case .park:
+                endgameFit = true
+                endgameDetail = "Simple park -- no special build needed"
+            }
+            analysisRow(
+                icon: result.game.endgameChallenge.icon,
+                label: "Endgame Fit",
+                detail: endgameDetail,
+                isGood: endgameFit,
+                color: .purple
+            )
+
+            // Speed fit for archetype
+            if result.game.archetype == .speed {
+                let totalSpeed = result.playerBuild.drivetrain.baseSpeed
+                    + result.playerBuild.frame.speedModifier
+                    + result.playerBuild.manipulator.speedModifier
+                let isFast = totalSpeed > 2.2
+                analysisRow(
+                    icon: "hare.fill",
+                    label: "Speed Rating",
+                    detail: "Speed Rush archetype rewards fast builds (\(String(format: "%.1f", totalSpeed)) m/s)",
+                    isGood: isFast,
+                    color: .cyan
+                )
+            }
+
+            // Power fit for archetype
+            if result.game.archetype == .power {
+                let strongPush = result.playerBuild.drivetrain.pushPower > 0.7
+                analysisRow(
+                    icon: "bolt.shield.fill",
+                    label: "Power Rating",
+                    detail: "Power Play rewards strong pushers (\(result.playerBuild.drivetrain.shortLabel))",
+                    isGood: strongPush,
+                    color: .red
+                )
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.white.opacity(0.03))
+        )
+    }
+
+    @ViewBuilder
+    private func analysisRow(icon: String, label: String, detail: String, isGood: Bool, color: Color) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.12))
+                    .frame(width: 28, height: 28)
+                Image(systemName: icon)
+                    .font(.system(size: 11))
+                    .foregroundStyle(color)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.8))
+                Text(detail)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+
+            Spacer()
+
+            Image(systemName: isGood ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(isGood ? .green : .red.opacity(0.7))
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - Decision Map
@@ -374,11 +627,11 @@ struct ResultsView: View {
         )
         nodeConnector()
 
-        let buildLabel = "\(result.playerBuild.drivetrain.shortLabel) / \(result.playerBuild.mechanism.shortLabel) / \(result.playerBuild.intake.shortLabel)"
+        let buildLabel = "\(result.playerBuild.drivetrain.shortLabel) / \(result.playerBuild.frame.shortLabel) / \(result.playerBuild.manipulator.shortLabel) / \(result.playerBuild.intake.shortLabel)"
         decisionNode(
             icon: "wrench.and.screwdriver.fill",
             label: buildLabel,
-            detail: "Robot build (max L\(result.playerBuild.mechanism.maxLevel))",
+            detail: "Robot build (max \(result.playerBuild.manipulator.maxReach.displayName))",
             color: .orange,
             isStart: false
         )
@@ -421,7 +674,7 @@ struct ResultsView: View {
                 Text(event.callout.rawValue)
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(.white.opacity(0.8))
-                Text("@\(timeStr) — Score: \(event.redScoreAtTime)-\(event.blueScoreAtTime)")
+                Text("@\(timeStr) -- Score: \(event.redScoreAtTime)-\(event.blueScoreAtTime)")
                     .font(.system(size: 8))
                     .foregroundStyle(.white.opacity(0.4))
             }

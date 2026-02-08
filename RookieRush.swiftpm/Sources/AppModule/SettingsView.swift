@@ -52,7 +52,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("About AI Coaching")
                             .font(.subheadline.bold())
-                        Text("When available, post-match feedback is powered by Apple's on-device Foundation Models. All processing happens locally — nothing is sent to the cloud. Falls back to rule-based coaching on unsupported devices.")
+                        Text("When available, post-match feedback is powered by Apple's on-device Foundation Models. All processing happens locally -- nothing is sent to the cloud. Falls back to rule-based coaching on unsupported devices.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -77,9 +77,9 @@ struct SettingsView: View {
 
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Match Coach: FRC Strategy Lab")
+                        Text("Rookie Workshop: FRC Robot Builder")
                             .font(.headline)
-                        Text("An interactive strategy experience inspired by FRC (FIRST Robotics Competition). Lead a 3-robot alliance through a simulated match. Choose strategy, role, and auto — then watch how your decisions play out.")
+                        Text("An interactive robot-building experience for FRC (FIRST Robotics Competition). Each round generates a unique procedural game with random scoring zones, game pieces, and endgame challenges. Analyze the game, pick the right robot parts, then compete in a 3v3 match simulation.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Text("Built for Swift Student Challenge 2026")

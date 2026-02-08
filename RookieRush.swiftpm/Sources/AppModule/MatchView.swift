@@ -9,6 +9,7 @@ struct MatchView: View {
     let playerRole: RobotRole
     let playerBuild: RobotBuild
     let autoPlan: AutoPlan
+    let game: GeneratedGame
     let onFinish: (MatchResult) -> Void
 
     @StateObject private var engine: MatchEngine
@@ -17,18 +18,19 @@ struct MatchView: View {
     @State private var hasStarted = false
 
     init(strategy: AllianceStrategy, playerRole: RobotRole, playerBuild: RobotBuild,
-         autoPlan: AutoPlan, onFinish: @escaping (MatchResult) -> Void) {
+         autoPlan: AutoPlan, game: GeneratedGame, onFinish: @escaping (MatchResult) -> Void) {
         self.strategy = strategy
         self.playerRole = playerRole
         self.playerBuild = playerBuild
         self.autoPlan = autoPlan
+        self.game = game
         self.onFinish = onFinish
 
         let configs = RobotFactory.buildRobots(
             playerRole: playerRole, strategy: strategy, playerBuild: playerBuild
         )
         _engine = StateObject(wrappedValue: MatchEngine(
-            configs: configs, strategy: strategy, playerAuto: autoPlan
+            configs: configs, strategy: strategy, playerAuto: autoPlan, game: game
         ))
     }
 
@@ -76,7 +78,7 @@ struct MatchView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "tortoise.fill")
                             .font(.caption2)
-                        Text("0.5× SLOW-MO")
+                        Text("0.5x SLOW-MO")
                             .font(.system(size: 10, weight: .bold, design: .monospaced))
                     }
                     .foregroundStyle(.orange)
@@ -89,7 +91,7 @@ struct MatchView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "hare.fill")
                             .font(.system(size: 8))
-                        Text("2× SPEED")
+                        Text("2x SPEED")
                             .font(.system(size: 9, weight: .bold, design: .monospaced))
                     }
                     .foregroundStyle(.white.opacity(0.3))
@@ -104,10 +106,10 @@ struct MatchView: View {
                     .padding(.bottom, 8)
                     .animation(.easeInOut(duration: 0.3), value: engine.isSlowMo)
 
-                // Footer text
-                Text("Demo Level 1 — future levels will be more in-depth")
+                // Footer: game name
+                Text(game.name)
                     .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(0.2))
+                    .foregroundStyle(.white.opacity(0.25))
                     .padding(.bottom, 4)
 
                 // Bottom controls
@@ -258,7 +260,7 @@ struct MatchView: View {
                             )
                         }
                         .disabled(!available)
-                        .accessibilityLabel("Callout: \(callout.rawValue) — \(isActive ? "Active" : callout.subtitle)")
+                        .accessibilityLabel("Callout: \(callout.rawValue) -- \(isActive ? "Active" : callout.subtitle)")
                     }
 
                     // Cooldown indicator
@@ -323,9 +325,9 @@ struct MatchSceneView: UIViewRepresentable {
         view.antialiasingMode = .multisampling4X
         view.allowsCameraControl = true  // Drag to orbit, pinch to zoom
 
-        let (scene, reefNodes) = FieldBuilder.buildScene()
+        let (scene, zoneNodes) = FieldBuilder.buildScene(game: engine.game)
         let robotNodes = RobotBuilder.addRobots(to: scene, configs: engine.configs)
-        engine.attach(scene: scene, robotNodes: robotNodes, reefNodes: reefNodes)
+        engine.attach(scene: scene, robotNodes: robotNodes, zoneNodes: zoneNodes)
 
         view.scene = scene
         onSceneReady(scene)

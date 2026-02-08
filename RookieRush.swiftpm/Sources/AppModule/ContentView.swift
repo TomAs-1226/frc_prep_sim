@@ -2,15 +2,19 @@ import SwiftUI
 
 // MARK: - Content View
 
-/// Main coordinator: Intro → PreMatch → Simulation → Results
+/// Main coordinator: Intro → Workshop → Simulation → Results
 struct ContentView: View {
+    @AppStorage("randomSeed") private var randomSeed: Int = 42
+
     @State private var phase: GamePhase = .intro
+    @State private var currentGame: GeneratedGame?
     @State private var strategy: AllianceStrategy?
     @State private var role: RobotRole?
     @State private var robotBuild: RobotBuild?
     @State private var autoPlan: AutoPlan?
     @State private var matchResult: MatchResult?
     @State private var showSettings = false
+    @State private var roundCounter: Int = 0
 
     var body: some View {
         ZStack {
@@ -18,23 +22,29 @@ struct ContentView: View {
                 switch phase {
                 case .intro:
                     IntroView(onStart: {
-                        withAnimation(.easeInOut(duration: 0.4)) { phase = .preMatch }
+                        currentGame = GameGenerator.generate(seed: UInt64(randomSeed + roundCounter))
+                        withAnimation(.easeInOut(duration: 0.4)) { phase = .workshop }
                     })
                     .transition(.opacity)
 
-                case .preMatch:
-                    PreMatchView { strat, r, build, auto in
-                        strategy = strat; role = r; robotBuild = build; autoPlan = auto
-                        withAnimation(.easeInOut(duration: 0.4)) { phase = .simulation }
+                case .workshop:
+                    if let game = currentGame {
+                        PreMatchView(game: game) { strat, r, build, auto in
+                            strategy = strat; role = r; robotBuild = build; autoPlan = auto
+                            withAnimation(.easeInOut(duration: 0.4)) { phase = .simulation }
+                        }
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .leading).combined(with: .opacity)
+                        ))
                     }
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal: .move(edge: .leading).combined(with: .opacity)
-                    ))
 
                 case .simulation:
-                    if let strat = strategy, let r = role, let build = robotBuild, let auto = autoPlan {
-                        MatchView(strategy: strat, playerRole: r, playerBuild: build, autoPlan: auto) { result in
+                    if let strat = strategy, let r = role,
+                       let build = robotBuild, let auto = autoPlan,
+                       let game = currentGame {
+                        MatchView(strategy: strat, playerRole: r, playerBuild: build,
+                                  autoPlan: auto, game: game) { result in
                             matchResult = result
                             withAnimation(.easeInOut(duration: 0.5)) { phase = .results }
                         }
@@ -53,8 +63,8 @@ struct ContentView: View {
             }
             .animation(.easeInOut(duration: 0.4), value: phase)
 
-            // Settings button (hidden during match)
-            if phase != .simulation {
+            // Settings button (visible during intro and workshop)
+            if phase == .intro || phase == .workshop {
                 VStack {
                     HStack {
                         Spacer()
@@ -83,6 +93,8 @@ struct ContentView: View {
 
     private func resetGame() {
         strategy = nil; role = nil; robotBuild = nil; autoPlan = nil; matchResult = nil
-        withAnimation(.easeInOut(duration: 0.4)) { phase = .intro }
+        roundCounter += 1
+        currentGame = GameGenerator.generate(seed: UInt64(randomSeed + roundCounter))
+        withAnimation(.easeInOut(duration: 0.4)) { phase = .workshop }
     }
 }

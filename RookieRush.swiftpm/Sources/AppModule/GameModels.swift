@@ -5,7 +5,7 @@ import SwiftUI
 
 enum GamePhase: Equatable {
     case intro
-    case preMatch
+    case workshop       // Robot building experience — the star of the app
     case simulation
     case results
 }
@@ -31,6 +31,659 @@ enum Alliance: String, CaseIterable {
     }
 }
 
+// MARK: - Seeded RNG
+
+struct SeededRNG: RandomNumberGenerator {
+    private var state: UInt64
+
+    init(seed: UInt64 = 42) { state = seed == 0 ? 1 : seed }
+
+    mutating func next() -> UInt64 {
+        state ^= state << 13; state ^= state >> 7; state ^= state << 17; return state
+    }
+    mutating func nextDouble() -> Double { Double(next() & 0x1FFFFFFFFFFFFF) / Double(1 << 53) }
+    mutating func nextFloat() -> Float { Float(nextDouble()) }
+    mutating func nextInt(_ range: Range<Int>) -> Int {
+        guard range.count > 0 else { return range.lowerBound }
+        return range.lowerBound + Int(next() % UInt64(range.count))
+    }
+    mutating func nextBool(probability: Double = 0.5) -> Bool { nextDouble() < probability }
+}
+
+// ============================================================================
+// MARK: - Procedural Game System
+// ============================================================================
+
+// MARK: - Game Piece Types
+
+enum GamePieceKind: String, CaseIterable, Identifiable {
+    case ball = "Power Cell"
+    case cube = "Cargo Cube"
+    case cone = "Signal Cone"
+    case ring = "Coral Ring"
+
+    var id: String { rawValue }
+
+    var color: Color {
+        switch self {
+        case .ball: return .orange
+        case .cube: return .purple
+        case .cone: return .yellow
+        case .ring: return Color(red: 0.90, green: 0.85, blue: 0.75)
+        }
+    }
+
+    var uiColor: UIColor {
+        switch self {
+        case .ball: return .systemOrange
+        case .cube: return .systemPurple
+        case .cone: return .systemYellow
+        case .ring: return UIColor(red: 0.90, green: 0.85, blue: 0.75, alpha: 1)
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .ball: return "circle.fill"
+        case .cube: return "cube.fill"
+        case .cone: return "triangle.fill"
+        case .ring: return "circle.dashed"
+        }
+    }
+
+    /// Which intake handles this piece best
+    var idealIntake: IntakeChoice {
+        switch self {
+        case .ball:  return .roller
+        case .cube:  return .claw
+        case .cone:  return .claw
+        case .ring:  return .roller
+        }
+    }
+}
+
+// MARK: - Scoring Height
+
+enum ScoringHeight: Int, CaseIterable, Comparable, Identifiable {
+    case ground = 0
+    case low    = 1
+    case mid    = 2
+    case high   = 3
+
+    var id: Int { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .ground: return "Ground"
+        case .low:    return "Low"
+        case .mid:    return "Mid"
+        case .high:   return "High"
+        }
+    }
+
+    /// 3D scene Y position
+    var sceneHeight: Float {
+        switch self {
+        case .ground: return 0.06
+        case .low:    return 0.40
+        case .mid:    return 0.72
+        case .high:   return 1.10
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .ground: return .green
+        case .low:    return .cyan
+        case .mid:    return .yellow
+        case .high:   return .red
+        }
+    }
+
+    static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+}
+
+// MARK: - Scoring Zone
+
+struct ScoringZone: Identifiable {
+    let id: Int
+    let name: String
+    let position: SIMD2<Float>   // scene (x, z) coordinates
+    let height: ScoringHeight
+    let pointsAuto: Int
+    let pointsTeleop: Int
+    let alliance: Alliance
+}
+
+// MARK: - Endgame Challenge
+
+enum EndgameChallenge: Equatable {
+    case climb(difficulty: ClimbDifficulty, points: Int)
+    case balance(points: Int)
+    case park(points: Int)
+
+    var displayName: String {
+        switch self {
+        case .climb(let d, _): return "Climb \(d.rawValue)"
+        case .balance:         return "Balance Platform"
+        case .park:            return "Park in Zone"
+        }
+    }
+
+    var points: Int {
+        switch self {
+        case .climb(_, let p): return p
+        case .balance(let p):  return p
+        case .park(let p):     return p
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .climb:   return "figure.climbing"
+        case .balance: return "scale.3d"
+        case .park:    return "parkingsign.circle.fill"
+        }
+    }
+
+    var requiresTank: Bool {
+        if case .climb(let d, _) = self, d == .high { return true }
+        return false
+    }
+}
+
+enum ClimbDifficulty: String, Equatable {
+    case low  = "Low Bar"
+    case mid  = "Mid Bar"
+    case high = "High Bar"
+
+    var climbTime: Double {
+        switch self {
+        case .low:  return 2.0
+        case .mid:  return 3.5
+        case .high: return 5.0
+        }
+    }
+}
+
+// MARK: - Field Obstacle
+
+struct FieldObstacle: Identifiable {
+    let id: Int
+    let kind: ObstacleKind
+    let position: SIMD2<Float>
+    let size: SIMD2<Float>
+}
+
+enum ObstacleKind: String {
+    case barrier = "Barrier"
+    case ramp    = "Ramp"
+    case bridge  = "Center Bridge"
+}
+
+// MARK: - Pickup Station
+
+struct PickupStation: Identifiable {
+    let id: Int
+    let position: SIMD2<Float>
+    let alliance: Alliance
+}
+
+// MARK: - Field Theme
+
+enum FieldTheme: String, CaseIterable {
+    case industrial = "Industrial"
+    case arena      = "Arena"
+    case cosmic     = "Cosmic"
+    case nature     = "Nature"
+
+    var floorColor: UIColor {
+        switch self {
+        case .industrial: return UIColor(red: 0.15, green: 0.16, blue: 0.18, alpha: 1)
+        case .arena:      return UIColor(red: 0.12, green: 0.14, blue: 0.20, alpha: 1)
+        case .cosmic:     return UIColor(red: 0.08, green: 0.08, blue: 0.20, alpha: 1)
+        case .nature:     return UIColor(red: 0.12, green: 0.18, blue: 0.14, alpha: 1)
+        }
+    }
+
+    var bgColor: UIColor {
+        switch self {
+        case .industrial: return UIColor(red: 0.04, green: 0.04, blue: 0.08, alpha: 1)
+        case .arena:      return UIColor(red: 0.03, green: 0.04, blue: 0.12, alpha: 1)
+        case .cosmic:     return UIColor(red: 0.02, green: 0.02, blue: 0.14, alpha: 1)
+        case .nature:     return UIColor(red: 0.04, green: 0.06, blue: 0.04, alpha: 1)
+        }
+    }
+}
+
+// MARK: - Game Archetype
+
+enum GameArchetype: String, CaseIterable {
+    case vertical  = "Altitude Challenge"
+    case speed     = "Speed Rush"
+    case precision = "Precision Strike"
+    case power     = "Power Play"
+    case classic   = "All-Rounder"
+
+    var description: String {
+        switch self {
+        case .vertical:  return "Tall scoring targets reward robots that can reach high. Climbing endgame favors sturdy builds."
+        case .speed:     return "Many low targets reward fast cycling. Light, agile builds dominate."
+        case .precision: return "Mid-height targets require accurate placement. Reliable builds shine."
+        case .power:     return "Obstacles and tight spaces reward strong pushers and durable frames."
+        case .classic:   return "A balanced mix of heights and challenges. Versatile builds do well."
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .vertical:  return "arrow.up.circle.fill"
+        case .speed:     return "hare.fill"
+        case .precision: return "scope"
+        case .power:     return "bolt.shield.fill"
+        case .classic:   return "star.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .vertical:  return .purple
+        case .speed:     return .cyan
+        case .precision: return .yellow
+        case .power:     return .red
+        case .classic:   return .orange
+        }
+    }
+}
+
+// MARK: - Generated Game
+
+struct GeneratedGame: Identifiable {
+    let id = UUID()
+    let name: String
+    let archetype: GameArchetype
+    let gamePieces: [GamePieceKind]
+    let scoringZones: [ScoringZone]
+    let pickupStations: [PickupStation]
+    let endgameChallenge: EndgameChallenge
+    let obstacles: [FieldObstacle]
+    let autoLeavePoints: Int
+    let theme: FieldTheme
+
+    var maxScoringHeight: ScoringHeight {
+        scoringZones.map(\.height).max() ?? .ground
+    }
+
+    var redZones: [ScoringZone] { scoringZones.filter { $0.alliance == .red } }
+    var blueZones: [ScoringZone] { scoringZones.filter { $0.alliance == .blue } }
+
+    /// How well does a build suit this game? Returns 0-100.
+    func buildMatchScore(build: RobotBuild) -> Int {
+        var score = 40
+
+        let maxReach = build.manipulator.maxReach
+        let maxZone = maxScoringHeight
+        if maxReach >= maxZone { score += 20 }
+        else if maxReach.rawValue >= maxZone.rawValue - 1 { score += 8 }
+
+        for piece in gamePieces {
+            if build.intake == piece.idealIntake { score += 10 }
+        }
+
+        switch endgameChallenge {
+        case .climb(let difficulty, _):
+            if difficulty == .high && build.drivetrain.canDeepClimb { score += 15 }
+            else if difficulty == .mid { score += 8 }
+            else if difficulty == .low { score += 5 }
+        case .balance:
+            if build.drivetrain.canStrafe { score += 10 }
+        case .park:
+            score += 3
+        }
+
+        if archetype == .speed {
+            let totalSpeed = build.drivetrain.baseSpeed + build.frame.speedModifier + build.manipulator.speedModifier
+            if totalSpeed > 2.2 { score += 12 }
+            else if totalSpeed > 2.0 { score += 6 }
+        }
+
+        if archetype == .power {
+            if build.drivetrain.pushPower > 0.7 { score += 10 }
+            if build.frame == .steel { score += 5 }
+        }
+
+        return min(100, max(0, score))
+    }
+
+    /// Build hints for the player
+    var challengeHints: [String] {
+        var hints: [String] = []
+        let highZones = redZones.filter { $0.height == .high }
+        let midZones = redZones.filter { $0.height == .mid }
+        let lowZones = redZones.filter { $0.height <= .low }
+
+        if !highZones.isEmpty {
+            hints.append("High targets (\(highZones.count)) need an Elevator — worth \(highZones[0].pointsTeleop)pts each")
+        }
+        if !midZones.isEmpty {
+            hints.append("Mid targets need Pivot Arm or Elevator — \(midZones[0].pointsTeleop)pts each")
+        }
+        if lowZones.count >= 3 {
+            hints.append("Many low targets — fast Simple Tray cycling could outscore slow climbers")
+        }
+
+        switch endgameChallenge {
+        case .climb(let d, let p):
+            if d == .high {
+                hints.append("High climb (\(p)pts) needs Tank Drive for deep climb")
+            } else {
+                hints.append("Climb endgame (\(p)pts) — plan time to get there")
+            }
+        case .balance(let p):
+            hints.append("Balance (\(p)pts) — Swerve or Mecanum strafing helps")
+        case .park(let p):
+            hints.append("Easy park (\(p)pts) — focus build on scoring speed")
+        }
+
+        for piece in gamePieces {
+            hints.append("\(piece.rawValue) works best with \(piece.idealIntake.shortLabel)")
+        }
+
+        return hints
+    }
+}
+
+// ============================================================================
+// MARK: - Robot Parts Catalog
+// ============================================================================
+
+// MARK: - Drivetrain
+
+enum DrivetrainChoice: String, CaseIterable, Identifiable {
+    case swerve  = "Swerve Drive"
+    case tank    = "Tank Drive"
+    case mecanum = "Mecanum Drive"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .swerve:  return "rotate.3d"
+        case .tank:    return "rectangle.on.rectangle"
+        case .mecanum: return "arrow.up.and.down.and.arrow.left.and.right"
+        }
+    }
+
+    var shortLabel: String {
+        switch self { case .swerve: return "Swerve"; case .tank: return "Tank"; case .mecanum: return "Mecanum" }
+    }
+
+    var description: String {
+        switch self {
+        case .swerve:  return "Independent wheel modules enable omnidirectional movement. Each wheel rotates 360°."
+        case .tank:    return "Fixed parallel wheels with skid steering. Simple, rugged, and powerful."
+        case .mecanum: return "Angled rollers on each wheel allow sideways strafing without turning."
+        }
+    }
+
+    var pros: String {
+        switch self {
+        case .swerve:  return "Fastest, can strafe, agile turning"
+        case .tank:    return "Reliable, strong push, deep climb (12pts)"
+        case .mecanum: return "Can strafe, moderate speed, balanced"
+        }
+    }
+
+    var cons: String {
+        switch self {
+        case .swerve:  return "Less reliable, weak pushing, shallow climb only"
+        case .tank:    return "Slower, no strafing, wide turns"
+        case .mecanum: return "Weak pushing, no deep climb, moderate reliability"
+        }
+    }
+
+    var color: Color {
+        switch self { case .swerve: return .cyan; case .tank: return .orange; case .mecanum: return .mint }
+    }
+
+    // Stats
+    var baseSpeed: Float {
+        switch self { case .swerve: return 2.30; case .tank: return 1.85; case .mecanum: return 2.05 }
+    }
+    var turnRate: Float {
+        switch self { case .swerve: return 3.5; case .tank: return 1.8; case .mecanum: return 2.8 }
+    }
+    var pushPower: Float {
+        switch self { case .swerve: return 0.3; case .tank: return 1.0; case .mecanum: return 0.45 }
+    }
+    var baseReliability: Float {
+        switch self { case .swerve: return 0.84; case .tank: return 0.94; case .mecanum: return 0.88 }
+    }
+    var weight: Float {
+        switch self { case .swerve: return 15; case .tank: return 18; case .mecanum: return 16 }
+    }
+    var canDeepClimb: Bool {
+        switch self { case .swerve: return false; case .tank: return true; case .mecanum: return false }
+    }
+    var canStrafe: Bool {
+        switch self { case .swerve: return true; case .tank: return false; case .mecanum: return true }
+    }
+}
+
+// MARK: - Frame
+
+enum FrameChoice: String, CaseIterable, Identifiable {
+    case aluminum  = "Aluminum Frame"
+    case steel     = "Steel Frame"
+    case composite = "Composite Frame"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .aluminum:  return "square.grid.3x3"
+        case .steel:     return "shield.fill"
+        case .composite: return "wind"
+        }
+    }
+
+    var shortLabel: String {
+        switch self { case .aluminum: return "Aluminum"; case .steel: return "Steel"; case .composite: return "Composite" }
+    }
+
+    var description: String {
+        switch self {
+        case .aluminum:  return "Industry standard. Good balance of weight, strength, and cost."
+        case .steel:     return "Heavy but extremely durable. Absorbs impacts and resists bending."
+        case .composite: return "Carbon fiber panels reduce weight significantly. Fragile under impact."
+        }
+    }
+
+    var pros: String {
+        switch self {
+        case .aluminum:  return "Balanced stats, affordable, easy to fabricate"
+        case .steel:     return "Most durable (+5% reliability), best for defense"
+        case .composite: return "Lightest (+0.15 speed), best for fast cycling"
+        }
+    }
+
+    var cons: String {
+        switch self {
+        case .aluminum:  return "No standout advantage in any area"
+        case .steel:     return "Heaviest (-0.20 speed), slows everything down"
+        case .composite: return "Fragile (-3% reliability), breaks under contact"
+        }
+    }
+
+    var color: Color {
+        switch self { case .aluminum: return .gray; case .steel: return .blue; case .composite: return .green }
+    }
+
+    var speedModifier: Float {
+        switch self { case .aluminum: return 0; case .steel: return -0.20; case .composite: return 0.15 }
+    }
+    var reliabilityModifier: Float {
+        switch self { case .aluminum: return 0; case .steel: return 0.05; case .composite: return -0.03 }
+    }
+    var weightValue: Float {
+        switch self { case .aluminum: return 10; case .steel: return 14; case .composite: return 7 }
+    }
+}
+
+// MARK: - Manipulator
+
+enum ManipulatorChoice: String, CaseIterable, Identifiable {
+    case elevator = "Cascading Elevator"
+    case arm      = "Pivot Arm"
+    case shooter  = "Flywheel Shooter"
+    case simple   = "Simple Tray"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .elevator: return "arrow.up.and.down"
+        case .arm:      return "arrow.up.right"
+        case .shooter:  return "scope"
+        case .simple:   return "tray.fill"
+        }
+    }
+
+    var shortLabel: String {
+        switch self { case .elevator: return "Elevator"; case .arm: return "Arm"; case .shooter: return "Shooter"; case .simple: return "Tray" }
+    }
+
+    var description: String {
+        switch self {
+        case .elevator: return "Telescoping stages reach all heights. Heavy but the only way to score High."
+        case .arm:      return "Rotating arm reaches Mid targets. Good balance of speed and reach."
+        case .shooter:  return "Dual flywheels launch pieces at targets. Can score from a distance."
+        case .simple:   return "Low-profile tray for ground/low scoring only. Lightest and fastest."
+        }
+    }
+
+    var pros: String {
+        switch self {
+        case .elevator: return "Reaches High targets (max points), versatile"
+        case .arm:      return "Reaches Mid, balanced speed, moderate weight"
+        case .shooter:  return "Scores from distance, reaches Mid effectively"
+        case .simple:   return "Fastest scoring (0.6s), lightest (+0.15 speed)"
+        }
+    }
+
+    var cons: String {
+        switch self {
+        case .elevator: return "Heavy (-0.25 speed), slow scoring (1.6s), less reliable"
+        case .arm:      return "Can't reach High targets, mid-range stats"
+        case .shooter:  return "Less accurate (-5% reliability), can't place precisely"
+        case .simple:   return "Ground/Low only, lowest scoring potential per piece"
+        }
+    }
+
+    var color: Color {
+        switch self { case .elevator: return .purple; case .arm: return .orange; case .shooter: return .red; case .simple: return .green }
+    }
+
+    var maxReach: ScoringHeight {
+        switch self { case .elevator: return .high; case .arm: return .mid; case .shooter: return .mid; case .simple: return .low }
+    }
+
+    var scoringTime: Double {
+        switch self { case .elevator: return 1.6; case .arm: return 1.2; case .shooter: return 1.0; case .simple: return 0.6 }
+    }
+
+    var speedModifier: Float {
+        switch self { case .elevator: return -0.25; case .arm: return -0.10; case .shooter: return -0.15; case .simple: return 0.15 }
+    }
+
+    var reliabilityModifier: Float {
+        switch self { case .elevator: return -0.05; case .arm: return 0; case .shooter: return -0.05; case .simple: return 0.05 }
+    }
+
+    var weightValue: Float {
+        switch self { case .elevator: return 8; case .arm: return 5; case .shooter: return 6; case .simple: return 2 }
+    }
+
+    var canShoot: Bool { self == .shooter }
+
+    var maxLevel: Int { maxReach.rawValue }
+}
+
+// MARK: - Intake
+
+enum IntakeChoice: String, CaseIterable, Identifiable {
+    case roller    = "Roller Intake"
+    case claw      = "Claw Gripper"
+    case pneumatic = "Pneumatic Gripper"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .roller:    return "gearshape.2.fill"
+        case .claw:      return "hand.point.up.fill"
+        case .pneumatic: return "lungs.fill"
+        }
+    }
+
+    var shortLabel: String {
+        switch self { case .roller: return "Rollers"; case .claw: return "Claw"; case .pneumatic: return "Pneumatic" }
+    }
+
+    var description: String {
+        switch self {
+        case .roller:    return "Spinning compliant wheels pull pieces in quickly. Best for balls and rings."
+        case .claw:      return "Mechanical fingers grip pieces precisely. Best for cubes and cones."
+        case .pneumatic: return "Air-powered grippers actuate instantly. Fastest pickup, heaviest system."
+        }
+    }
+
+    var pros: String {
+        switch self {
+        case .roller:    return "Fast pickup (0.5s), great for balls/rings"
+        case .claw:      return "Most reliable (+8%), precise grip, great for cubes/cones"
+        case .pneumatic: return "Fastest pickup (0.3s), strong grip force"
+        }
+    }
+
+    var cons: String {
+        switch self {
+        case .roller:    return "Less reliable (-5%), can fumble pieces"
+        case .claw:      return "Slow pickup (1.0s), loses time each cycle"
+        case .pneumatic: return "Heavy (needs compressor), moderate reliability"
+        }
+    }
+
+    var color: Color {
+        switch self { case .roller: return .teal; case .claw: return .yellow; case .pneumatic: return .indigo }
+    }
+
+    var pickupTime: Double {
+        switch self { case .roller: return 0.5; case .claw: return 1.0; case .pneumatic: return 0.3 }
+    }
+
+    var reliabilityModifier: Float {
+        switch self { case .roller: return -0.05; case .claw: return 0.08; case .pneumatic: return 0.0 }
+    }
+
+    var weightValue: Float {
+        switch self { case .roller: return 3; case .claw: return 4; case .pneumatic: return 6 }
+    }
+}
+
+// ============================================================================
+// MARK: - Robot Configuration
+// ============================================================================
+
+// MARK: - Robot Build
+
+struct RobotBuild: Equatable {
+    var drivetrain: DrivetrainChoice = .tank
+    var frame: FrameChoice = .aluminum
+    var manipulator: ManipulatorChoice = .arm
+    var intake: IntakeChoice = .roller
+}
+
 // MARK: - Robot Role
 
 enum RobotRole: String, CaseIterable, Identifiable {
@@ -50,15 +703,71 @@ enum RobotRole: String, CaseIterable, Identifiable {
 
     var description: String {
         switch self {
-        case .scorer:
-            return "Places game pieces on higher tower levels. Slower but scores big per piece."
-        case .cycler:
-            return "Rapid piece delivery focusing on L1-L2. Fast cycles, high volume."
-        case .defender:
-            return "Disrupts opponents by blocking lanes. Tough and fast, scores when open."
+        case .scorer:   return "Places pieces on higher targets. Slower but maximizes points per piece."
+        case .cycler:   return "Rapid piece delivery to low targets. Fast cycles, high volume."
+        case .defender: return "Disrupts opponents by blocking lanes. Tough and fast, scores when open."
         }
     }
 }
+
+// MARK: - Robot Stats
+
+struct RobotStats {
+    let maxSpeed: Float
+    let acceleration: Float
+    let turnRate: Float
+    let scoringTime: Double
+    let pickupTime: Double
+    let reliability: Double
+    let maxReachHeight: ScoringHeight
+    let pushPower: Float
+    let canDeepClimb: Bool
+    let canStrafe: Bool
+    let canShoot: Bool
+    let totalWeight: Float
+}
+
+// MARK: - Superstructure Type (visual)
+
+enum SuperstructureType: String {
+    case elevator
+    case arm
+    case shooter
+    case intake
+    case wedge
+}
+
+// MARK: - Robot Config
+
+struct RobotConfig: Identifiable {
+    let id: Int
+    let alliance: Alliance
+    let role: RobotRole
+    let stats: RobotStats
+    let superstructure: SuperstructureType
+    let build: RobotBuild
+    let teamNumber: String
+    let startPosition: SIMD2<Float>
+}
+
+// MARK: - Robot State
+
+enum RobotState: String {
+    case idle           = "Idle"
+    case driving        = "Driving"
+    case pickingUp      = "Picking Up"
+    case scoring        = "Scoring"
+    case defending      = "Defending"
+    case headingEndgame = "→ Endgame"
+    case climbing       = "Climbing"
+    case parked         = "Parked"
+    case stalled        = "Stalled!"
+    case autoPath       = "Auto Path"
+}
+
+// ============================================================================
+// MARK: - Strategy & Callouts
+// ============================================================================
 
 // MARK: - Alliance Strategy
 
@@ -87,12 +796,9 @@ enum AllianceStrategy: String, CaseIterable, Identifiable {
 
     var description: String {
         switch self {
-        case .aggressive:
-            return "All-in on scoring. High risk, high reward. No dedicated defense."
-        case .balanced:
-            return "Mix of scoring and defense. Adaptable mid-match."
-        case .defensive:
-            return "One bot defends while others cycle. Slows opponents, wins by margin."
+        case .aggressive: return "All-in on scoring. High risk, high reward. No dedicated defense."
+        case .balanced:   return "Mix of scoring and defense. Adaptable mid-match."
+        case .defensive:  return "One bot defends while others cycle. Slows opponents, wins by margin."
         }
     }
 
@@ -102,6 +808,35 @@ enum AllianceStrategy: String, CaseIterable, Identifiable {
         case .balanced:   return StrategyPolicy(scoringWeight: 0.6, defenseWeight: 0.2, endgameWeight: 0.2)
         case .defensive:  return StrategyPolicy(scoringWeight: 0.4, defenseWeight: 0.45, endgameWeight: 0.15)
         }
+    }
+}
+
+// MARK: - Strategy Policy
+
+struct StrategyPolicy {
+    var scoringWeight: Double
+    var defenseWeight: Double
+    var endgameWeight: Double
+    var preferHighLevel: Bool = false
+    var spreadOut: Bool = false
+
+    func applying(callout: Callout) -> StrategyPolicy {
+        var p = self
+        switch callout {
+        case .pushScoring:  p.scoringWeight += 0.3
+        case .playDefense:  p.defenseWeight += 0.4
+        case .endgameNow:   p.endgameWeight += 0.5
+        case .focusHigh:    p.preferHighLevel = true; p.scoringWeight += 0.15
+        case .spreadOut:    p.spreadOut = true
+        case .allOut:       p.scoringWeight = 1.0; p.defenseWeight = 0
+        }
+        return p
+    }
+
+    var dominantMode: String {
+        if endgameWeight >= scoringWeight && endgameWeight >= defenseWeight { return "Endgame Push" }
+        else if defenseWeight >= scoringWeight { return "Defense Mode" }
+        else { return "Scoring Mode" }
     }
 }
 
@@ -123,256 +858,77 @@ enum AutoPlan: String, CaseIterable, Identifiable {
     }
 
     var color: Color {
-        switch self {
-        case .safe:     return .green
-        case .moderate: return .yellow
-        case .risky:    return .red
-        }
+        switch self { case .safe: return .green; case .moderate: return .yellow; case .risky: return .red }
     }
 
     var description: String {
         switch self {
-        case .safe:
-            return "Cross launch line + score 1 game piece. Reliable guaranteed points."
-        case .moderate:
-            return "Score 2 pieces during auto. Needs decent speed and accuracy."
-        case .risky:
-            return "Attempt 3 pieces in auto. High ceiling but real stall chance."
+        case .safe:     return "Cross line + score 1 piece. Reliable guaranteed points."
+        case .moderate: return "Score 2 pieces during auto. Needs decent speed and accuracy."
+        case .risky:    return "Attempt 3 pieces in auto. High ceiling but real stall chance."
         }
     }
 
     var piecesAttempted: Int {
-        switch self {
-        case .safe: return 1; case .moderate: return 2; case .risky: return 3
-        }
+        switch self { case .safe: return 1; case .moderate: return 2; case .risky: return 3 }
     }
 
     var successRate: Double {
-        switch self {
-        case .safe: return 0.95; case .moderate: return 0.75; case .risky: return 0.45
-        }
+        switch self { case .safe: return 0.95; case .moderate: return 0.75; case .risky: return 0.45 }
     }
 }
 
-// MARK: - Robot Build Configuration
-
-struct RobotBuild: Equatable {
-    var drivetrain: DrivetrainType = .swerve
-    var mechanism: MechanismType = .elevator
-    var intake: IntakeType = .claw
-}
-
-// MARK: - Drivetrain Type
-//
-// Balance philosophy:
-//   Swerve = fast + agile but fragile, weak pushing, shallow climb only (6pts)
-//   Tank   = slower but reliable, strong pushing, deep climb capable (12pts)
-
-enum DrivetrainType: String, CaseIterable, Identifiable {
-    case swerve = "Swerve Drive"
-    case tank   = "Tank Drive"
-
-    var id: String { rawValue }
-    var icon: String {
-        switch self { case .swerve: return "rotate.3d"; case .tank: return "rectangle.on.rectangle" }
-    }
-    var shortLabel: String {
-        switch self { case .swerve: return "Swerve"; case .tank: return "Tank" }
-    }
-    var description: String {
-        switch self {
-        case .swerve: return "Fast omnidirectional movement with strafing ability."
-        case .tank:   return "Strong pushing power with high reliability."
-        }
-    }
-    var pros: String {
-        switch self {
-        case .swerve: return "Fastest speed, can strafe, agile turning"
-        case .tank:   return "Very reliable, strong defense/pushing, deep climb (12pts)"
-        }
-    }
-    var cons: String {
-        switch self {
-        case .swerve: return "Less reliable, weak pushing, shallow climb only (6pts)"
-        case .tank:   return "Slower, no strafing, wider turns"
-        }
-    }
-    var color: Color {
-        switch self { case .swerve: return .cyan; case .tank: return .orange }
-    }
-}
-
-// MARK: - Mechanism Type
-//
-// Balance philosophy:
-//   Elevator = reaches L4 (5pts) but heavy (speed penalty), slow scoring, less reliable
-//   Arm      = reaches L3 (4pts), moderate speed, good all-rounder
-//   Simple   = only L1-L2 but fastest scoring, most reliable, lightweight (speed bonus!)
-
-enum MechanismType: String, CaseIterable, Identifiable {
-    case elevator = "Cascading Elevator"
-    case arm      = "Pivot Arm"
-    case simple   = "Low Intake"
-
-    var id: String { rawValue }
-    var icon: String {
-        switch self { case .elevator: return "arrow.up.and.down"; case .arm: return "arrow.up.right"; case .simple: return "tray.fill" }
-    }
-    var shortLabel: String {
-        switch self { case .elevator: return "Elevator"; case .arm: return "Arm"; case .simple: return "Low" }
-    }
-    var description: String {
-        switch self {
-        case .elevator: return "Cascading stages reach all levels L1-L4."
-        case .arm:      return "Pivot arm reaches L1-L3. Versatile all-rounder."
-        case .simple:   return "Ground-level intake, L1-L2 only. Volume over height."
-        }
-    }
-    var pros: String {
-        switch self {
-        case .elevator: return "Reaches L4 (5pts/piece), highest scoring ceiling"
-        case .arm:      return "Reaches L3, balanced speed, moderate scoring"
-        case .simple:   return "Fastest scoring (0.6s), lightweight speed bonus, most reliable"
-        }
-    }
-    var cons: String {
-        switch self {
-        case .elevator: return "Heavy (slows robot), slow scoring (1.6s), less reliable"
-        case .arm:      return "Can't reach L4, middle-of-the-road stats"
-        case .simple:   return "Only L1-L2 (2-3pts/piece), low ceiling"
-        }
-    }
-    var color: Color {
-        switch self { case .elevator: return .purple; case .arm: return .orange; case .simple: return .green }
-    }
-    var maxLevel: Int {
-        switch self { case .elevator: return 4; case .arm: return 3; case .simple: return 2 }
-    }
-}
-
-// MARK: - Intake Type
-//
-// Balance philosophy:
-//   Claw   = reliable scoring (rarely drops), precise placement, but slow pickup
-//   Roller = lightning fast pickup, great ground game, but less reliable scoring
-
-enum IntakeType: String, CaseIterable, Identifiable {
-    case claw   = "Claw Grabber"
-    case roller = "Roller Intake"
-
-    var id: String { rawValue }
-    var icon: String {
-        switch self { case .claw: return "hand.point.up.fill"; case .roller: return "gearshape.2.fill" }
-    }
-    var shortLabel: String {
-        switch self { case .claw: return "Claw"; case .roller: return "Rollers" }
-    }
-    var description: String {
-        switch self {
-        case .claw:   return "Precise grip for reliable placement."
-        case .roller: return "Spinning rollers for fast ground pickup."
-        }
-    }
-    var pros: String {
-        switch self {
-        case .claw:   return "Very reliable scoring (+8%), precise placement"
-        case .roller: return "Fast pickup (0.5s vs 1.0s), great ground game"
-        }
-    }
-    var cons: String {
-        switch self {
-        case .claw:   return "Slow pickup (1.0s), loses time each cycle"
-        case .roller: return "Less reliable scoring (-5%), can drop game pieces"
-        }
-    }
-    var color: Color {
-        switch self { case .claw: return .yellow; case .roller: return .teal }
-    }
-}
-
-// MARK: - Strategy Policy
-
-struct StrategyPolicy {
-    var scoringWeight: Double
-    var defenseWeight: Double
-    var endgameWeight: Double
-    var preferHighLevel: Bool = false
-    var spreadOut: Bool = false
-
-    func applying(callout: Callout) -> StrategyPolicy {
-        var p = self
-        switch callout {
-        case .prioritizeReef: p.scoringWeight += 0.3
-        case .switchDefense:  p.defenseWeight += 0.4
-        case .endgameEarly:   p.endgameWeight += 0.5
-        case .focusHigh:      p.preferHighLevel = true; p.scoringWeight += 0.15
-        case .spreadOut:      p.spreadOut = true
-        case .allOutAttack:   p.scoringWeight = 1.0; p.defenseWeight = 0
-        }
-        return p
-    }
-
-    var dominantMode: String {
-        if endgameWeight >= scoringWeight && endgameWeight >= defenseWeight { return "Endgame Push" }
-        else if defenseWeight >= scoringWeight { return "Defense Mode" }
-        else { return "Scoring Mode" }
-    }
-}
-
-// MARK: - Callout (6 strategic options)
+// MARK: - Callout
 
 enum Callout: String, CaseIterable, Identifiable {
-    case prioritizeReef = "Push Tower"
-    case switchDefense  = "Play Defense"
-    case endgameEarly   = "Endgame Now"
-    case focusHigh      = "Focus High"
-    case spreadOut      = "Switch Sides"
-    case allOutAttack   = "All Out"
+    case pushScoring = "Push Scoring"
+    case playDefense = "Play Defense"
+    case endgameNow  = "Endgame Now"
+    case focusHigh   = "Focus High"
+    case spreadOut   = "Spread Out"
+    case allOut      = "All Out"
 
     var id: String { rawValue }
+
     var icon: String {
         switch self {
-        case .prioritizeReef: return "scope"
-        case .switchDefense:  return "shield.fill"
-        case .endgameEarly:   return "flag.checkered"
-        case .focusHigh:      return "arrow.up.to.line"
-        case .spreadOut:      return "arrow.left.and.right"
-        case .allOutAttack:   return "flame.fill"
-        }
-    }
-    var color: Color {
-        switch self {
-        case .prioritizeReef: return .orange
-        case .switchDefense:  return .green
-        case .endgameEarly:   return .purple
-        case .focusHigh:      return .red
-        case .spreadOut:      return .cyan
-        case .allOutAttack:   return .yellow
-        }
-    }
-    var subtitle: String {
-        switch self {
-        case .prioritizeReef: return "Boost scoring"
-        case .switchDefense:  return "Block opponents"
-        case .endgameEarly:   return "Rush to climb"
-        case .focusHigh:      return "Target L3-L4"
-        case .spreadOut:      return "Reduce congestion"
-        case .allOutAttack:   return "Max aggression"
+        case .pushScoring: return "scope"
+        case .playDefense: return "shield.fill"
+        case .endgameNow:  return "flag.checkered"
+        case .focusHigh:   return "arrow.up.to.line"
+        case .spreadOut:   return "arrow.left.and.right"
+        case .allOut:      return "flame.fill"
         }
     }
 
-    /// Period-based availability — some callouts are restricted.
-    func isAvailable(during period: MatchPeriod) -> Bool {
+    var color: Color {
         switch self {
-        case .endgameEarly:
-            return period == .teleop || period == .endgame
-        case .prioritizeReef, .switchDefense, .focusHigh, .spreadOut, .allOutAttack:
-            return period == .teleop || period == .endgame
+        case .pushScoring: return .orange
+        case .playDefense: return .green
+        case .endgameNow:  return .purple
+        case .focusHigh:   return .red
+        case .spreadOut:   return .cyan
+        case .allOut:      return .yellow
         }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .pushScoring: return "Boost scoring"
+        case .playDefense: return "Block opponents"
+        case .endgameNow:  return "Rush endgame"
+        case .focusHigh:   return "Target high zones"
+        case .spreadOut:   return "Reduce congestion"
+        case .allOut:      return "Max aggression"
+        }
+    }
+
+    func isAvailable(during period: MatchPeriod) -> Bool {
+        period == .teleop || period == .endgame
     }
 }
 
-// MARK: - Callout Event (for decision map)
+// MARK: - Callout Event
 
 struct CalloutEvent: Equatable {
     let callout: Callout
@@ -390,96 +946,6 @@ enum MatchPeriod: String {
     case finished = "FINAL"
 }
 
-// MARK: - Robot Stats
-
-struct RobotStats {
-    let maxSpeed: Float
-    let acceleration: Float
-    let turnRate: Float
-    let scoringTime: Double
-    let pickupTime: Double
-    let reliability: Double   // 0-1
-    let maxReefLevel: Int
-    let pushPower: Float      // 0-1, affects defense collisions
-    let canDeepClimb: Bool    // true = 12pts endgame, false = 6pts
-}
-
-// MARK: - Superstructure Type (visual)
-
-enum SuperstructureType: String {
-    case elevator
-    case arm
-    case intake
-    case wedge
-}
-
-// MARK: - Robot Configuration
-
-struct RobotConfig: Identifiable {
-    let id: Int
-    let alliance: Alliance
-    let role: RobotRole
-    let stats: RobotStats
-    let superstructure: SuperstructureType
-    let build: RobotBuild
-    let teamNumber: String
-    let startPosition: SIMD2<Float>
-}
-
-// MARK: - Robot State
-
-enum RobotState: String {
-    case idle           = "Idle"
-    case driving        = "Driving"
-    case pickingUp      = "Picking Up"
-    case scoring        = "Scoring"
-    case defending      = "Defending"
-    case headingEndgame = "→ Endgame"
-    case climbing       = "Climbing"
-    case parked         = "Parked"
-    case stalled        = "Stalled!"
-    case autoPath       = "Auto Path"
-}
-
-// MARK: - Game Piece
-
-struct GamePiece: Identifiable {
-    let id: Int
-    var position: SIMD2<Float>
-    var state: PieceState
-    var carriedBy: Int?
-
-    enum PieceState { case onField, carried, scored }
-}
-
-// MARK: - Field Layout (references FieldSpec)
-
-enum FieldLayout {
-    static let fieldWidth: Float  = FieldSpec.fieldLength
-    static let fieldLength: Float = FieldSpec.fieldWidth
-    static let halfWidth: Float   = FieldSpec.halfLength
-    static let halfLength: Float  = FieldSpec.halfWidth
-
-    static let redSource: SIMD2<Float>  = SIMD2(3.50, 0.0)
-    static let blueSource: SIMD2<Float> = SIMD2(-3.50, 0.0)
-
-    static func redReefApproach(_ faceIndex: Int) -> SIMD2<Float> {
-        FieldSpec.scoringApproach(center: FieldSpec.redReefCenter, faceIndex: faceIndex)
-    }
-    static func blueReefApproach(_ faceIndex: Int) -> SIMD2<Float> {
-        FieldSpec.scoringApproach(center: FieldSpec.blueReefCenter, faceIndex: faceIndex)
-    }
-
-    static let redProcessor  = FieldSpec.redProcessor
-    static let blueProcessor = FieldSpec.blueProcessor
-
-    static let redBarge  = SIMD2<Float>( 0.35, 0.0)
-    static let blueBarge = SIMD2<Float>(-0.35, 0.0)
-
-    static let redStarts  = FieldSpec.redStarts
-    static let blueStarts = FieldSpec.blueStarts
-}
-
 // MARK: - Match Timing
 
 enum MatchTiming {
@@ -489,9 +955,20 @@ enum MatchTiming {
     static let totalDuration: Double = 150.0
 }
 
+// MARK: - Coaching Tip
+
+struct CoachingTip: Equatable {
+    let headline: String
+    let detail: String
+    let highlightRobotId: Int?
+}
+
+// ============================================================================
 // MARK: - Match Result
+// ============================================================================
 
 struct MatchResult {
+    let game: GeneratedGame
     let playerStrategy: AllianceStrategy
     let playerRole: RobotRole
     let playerAuto: AutoPlan
@@ -507,6 +984,7 @@ struct MatchResult {
     let didPlayerStall: Bool
     let matchDuration: Double
     let slowMoUsed: Bool
+    let buildMatchScore: Int
 
     var playerWon: Bool { redScore > blueScore }
     var margin: Int { abs(redScore - blueScore) }
@@ -517,41 +995,236 @@ struct ScoreBreakdown {
     var teleopPoints: Int = 0
     var endgamePoints: Int = 0
     var totalPieces: Int = 0
-    var processorPieces: Int = 0
-    var coralL1: Int = 0
-    var coralL2: Int = 0
-    var coralL3: Int = 0
-    var coralL4: Int = 0
+    var groundScores: Int = 0
+    var lowScores: Int = 0
+    var midScores: Int = 0
+    var highScores: Int = 0
     var total: Int { autoPoints + teleopPoints + endgamePoints }
 }
 
-// MARK: - Seeded RNG
+// ============================================================================
+// MARK: - Field Layout
+// ============================================================================
 
-struct SeededRNG: RandomNumberGenerator {
-    private var state: UInt64
+enum FieldLayout {
+    static let fieldWidth: Float  = 8.23
+    static let fieldLength: Float = 4.03
+    static let halfWidth: Float   = 4.115
+    static let halfLength: Float  = 2.015
 
-    init(seed: UInt64 = 42) { state = seed == 0 ? 1 : seed }
+    static let redStarts: [SIMD2<Float>] = [
+        SIMD2( 3.72, -0.70),
+        SIMD2( 3.72,  0.00),
+        SIMD2( 3.72,  0.70),
+    ]
+    static let blueStarts: [SIMD2<Float>] = [
+        SIMD2(-3.72, -0.70),
+        SIMD2(-3.72,  0.00),
+        SIMD2(-3.72,  0.70),
+    ]
 
-    mutating func next() -> UInt64 {
-        state ^= state << 13; state ^= state >> 7; state ^= state << 17; return state
+    static let redAutoLine: Float = 3.42
+    static let blueAutoLine: Float = -3.42
+
+    static let endgameRedPos  = SIMD2<Float>( 0.35, 0.0)
+    static let endgameBluePos = SIMD2<Float>(-0.35, 0.0)
+}
+
+// ============================================================================
+// MARK: - Game Generator
+// ============================================================================
+
+enum GameGenerator {
+
+    static func generate(seed: UInt64) -> GeneratedGame {
+        var rng = SeededRNG(seed: seed)
+
+        let archetype = GameArchetype.allCases[rng.nextInt(0..<GameArchetype.allCases.count)]
+        let theme = FieldTheme.allCases[rng.nextInt(0..<FieldTheme.allCases.count)]
+        let name = generateName(archetype: archetype, rng: &rng)
+        let pieces = generatePieces(archetype: archetype, rng: &rng)
+        let zones = generateScoringZones(archetype: archetype, rng: &rng)
+        let endgame = generateEndgame(archetype: archetype, rng: &rng)
+        let obstacles = generateObstacles(archetype: archetype, rng: &rng)
+
+        let pickups = [
+            PickupStation(id: 0, position: SIMD2(3.70, -1.20), alliance: .red),
+            PickupStation(id: 1, position: SIMD2(3.70,  1.20), alliance: .red),
+            PickupStation(id: 2, position: SIMD2(-3.70, -1.20), alliance: .blue),
+            PickupStation(id: 3, position: SIMD2(-3.70,  1.20), alliance: .blue),
+        ]
+
+        return GeneratedGame(
+            name: name,
+            archetype: archetype,
+            gamePieces: pieces,
+            scoringZones: zones,
+            pickupStations: pickups,
+            endgameChallenge: endgame,
+            obstacles: obstacles,
+            autoLeavePoints: 3,
+            theme: theme
+        )
     }
-    mutating func nextDouble() -> Double { Double(next() & 0x1FFFFFFFFFFFFF) / Double(1 << 53) }
-    mutating func nextFloat() -> Float { Float(nextDouble()) }
-    mutating func nextInt(_ range: Range<Int>) -> Int {
-        guard range.count > 0 else { return range.lowerBound }
-        return range.lowerBound + Int(next() % UInt64(range.count))
+
+    // MARK: - Name Generation
+
+    private static func generateName(archetype: GameArchetype, rng: inout SeededRNG) -> String {
+        let adjectives = ["Stellar", "Rapid", "Iron", "Quantum", "Voltage", "Titan", "Nova", "Apex", "Turbo", "Hyper"]
+        let nouns: [String]
+        switch archetype {
+        case .vertical:  nouns = ["Heights", "Ascent", "Summit", "Pinnacle", "Skyreach"]
+        case .speed:     nouns = ["Sprint", "Dash", "Blitz", "Rush", "Velocity"]
+        case .precision: nouns = ["Strike", "Focus", "Aim", "Precision", "Marksman"]
+        case .power:     nouns = ["Forge", "Clash", "Siege", "Fortress", "Bastion"]
+        case .classic:   nouns = ["Challenge", "Arena", "Circuit", "Showdown", "Gauntlet"]
+        }
+
+        let adj = adjectives[rng.nextInt(0..<adjectives.count)]
+        let noun = nouns[rng.nextInt(0..<nouns.count)]
+        return "\(adj) \(noun)"
+    }
+
+    // MARK: - Piece Generation
+
+    private static func generatePieces(archetype: GameArchetype, rng: inout SeededRNG) -> [GamePieceKind] {
+        let allPieces = GamePieceKind.allCases
+        let primary = allPieces[rng.nextInt(0..<allPieces.count)]
+
+        if rng.nextBool(probability: 0.4) {
+            var secondary = allPieces[rng.nextInt(0..<allPieces.count)]
+            while secondary == primary { secondary = allPieces[rng.nextInt(0..<allPieces.count)] }
+            return [primary, secondary]
+        }
+        return [primary]
+    }
+
+    // MARK: - Scoring Zone Generation
+
+    private static func generateScoringZones(archetype: GameArchetype, rng: inout SeededRNG) -> [ScoringZone] {
+        var zones: [ScoringZone] = []
+        var zoneId = 0
+
+        // Define height distribution per archetype
+        let heights: [ScoringHeight]
+        switch archetype {
+        case .vertical:
+            heights = [.ground, .low, .mid, .high]
+        case .speed:
+            heights = [.ground, .ground, .ground, .low]
+        case .precision:
+            heights = [.ground, .mid, .mid, .high]
+        case .power:
+            heights = [.ground, .ground, .low, .mid]
+        case .classic:
+            heights = [.ground, .low, .mid, .high]
+        }
+
+        // Z positions for scoring zones (spread across field width)
+        let zPositions: [Float] = [-1.10, -0.35, 0.35, 1.10]
+
+        // Generate for red alliance
+        for (i, height) in heights.enumerated() {
+            let xBase: Float = 1.8 + rng.nextFloat() * 0.8  // 1.8 to 2.6
+            let z = zPositions[i % zPositions.count]
+            let autoPts = pointsForHeight(height, isAuto: true)
+            let telePts = pointsForHeight(height, isAuto: false)
+
+            zones.append(ScoringZone(
+                id: zoneId, name: "\(height.displayName) Target \(i + 1)",
+                position: SIMD2(xBase, z), height: height,
+                pointsAuto: autoPts, pointsTeleop: telePts, alliance: .red
+            ))
+            zoneId += 1
+
+            // Mirror for blue
+            zones.append(ScoringZone(
+                id: zoneId, name: "\(height.displayName) Target \(i + 1)",
+                position: SIMD2(-xBase, z), height: height,
+                pointsAuto: autoPts, pointsTeleop: telePts, alliance: .blue
+            ))
+            zoneId += 1
+        }
+
+        return zones
+    }
+
+    private static func pointsForHeight(_ height: ScoringHeight, isAuto: Bool) -> Int {
+        let base: Int
+        switch height {
+        case .ground: base = 2
+        case .low:    base = 3
+        case .mid:    base = 5
+        case .high:   base = 7
+        }
+        return isAuto ? base + 1 : base
+    }
+
+    // MARK: - Endgame Generation
+
+    private static func generateEndgame(archetype: GameArchetype, rng: inout SeededRNG) -> EndgameChallenge {
+        switch archetype {
+        case .vertical:
+            return .climb(difficulty: .high, points: 12)
+        case .speed:
+            return .park(points: 2)
+        case .precision:
+            return .balance(points: 8)
+        case .power:
+            return .climb(difficulty: .low, points: 6)
+        case .classic:
+            let options: [EndgameChallenge] = [
+                .climb(difficulty: .mid, points: 8),
+                .climb(difficulty: .low, points: 6),
+                .balance(points: 8),
+            ]
+            return options[rng.nextInt(0..<options.count)]
+        }
+    }
+
+    // MARK: - Obstacle Generation
+
+    private static func generateObstacles(archetype: GameArchetype, rng: inout SeededRNG) -> [FieldObstacle] {
+        var obstacles: [FieldObstacle] = []
+
+        // Center bridge is always present (like the old barge)
+        obstacles.append(FieldObstacle(
+            id: 0, kind: .bridge,
+            position: SIMD2(0, 0),
+            size: SIMD2(0.56, 4.0)
+        ))
+
+        // Power Play gets extra barriers
+        if archetype == .power {
+            obstacles.append(FieldObstacle(
+                id: 1, kind: .barrier,
+                position: SIMD2(1.5, 0),
+                size: SIMD2(0.10, 1.2)
+            ))
+            obstacles.append(FieldObstacle(
+                id: 2, kind: .barrier,
+                position: SIMD2(-1.5, 0),
+                size: SIMD2(0.10, 1.2)
+            ))
+        }
+
+        // Random chance of ramp
+        if rng.nextBool(probability: 0.3) && archetype != .speed {
+            let side: Float = rng.nextBool() ? 1.0 : -1.0
+            obstacles.append(FieldObstacle(
+                id: obstacles.count, kind: .ramp,
+                position: SIMD2(side * 1.0, rng.nextFloat() * 1.5 - 0.75),
+                size: SIMD2(0.5, 0.8)
+            ))
+        }
+
+        return obstacles
     }
 }
 
-// MARK: - Coaching Tip
-
-struct CoachingTip: Equatable {
-    let headline: String
-    let detail: String
-    let highlightRobotId: Int?
-}
-
+// ============================================================================
 // MARK: - Robot Factory
+// ============================================================================
 
 enum RobotFactory {
 
@@ -563,7 +1236,7 @@ enum RobotFactory {
         var rng = SeededRNG(seed: seed)
         var configs: [RobotConfig] = []
 
-        // --- Red Alliance (player's team) ---
+        // Player robot (red alliance, id 0)
         let playerStats = statsForBuild(playerBuild, role: playerRole, boost: true)
         configs.append(RobotConfig(
             id: 0, alliance: .red, role: playerRole,
@@ -573,7 +1246,7 @@ enum RobotFactory {
             teamNumber: redTeamNumbers[0], startPosition: FieldLayout.redStarts[0]
         ))
 
-        // Red teammates — randomized builds matching their role
+        // Red teammates
         let comp1Role = complementRole1(for: strategy, playerRole: playerRole)
         let comp1Build = randomBuild(for: comp1Role, rng: &rng)
         configs.append(RobotConfig(
@@ -594,7 +1267,7 @@ enum RobotFactory {
             teamNumber: redTeamNumbers[2], startPosition: FieldLayout.redStarts[2]
         ))
 
-        // --- Blue Alliance (opponents — randomized with varied roles) ---
+        // Blue alliance (opponents)
         let blueRoles: [RobotRole] = [.scorer, .cycler, .defender]
         for (i, role) in blueRoles.enumerated() {
             let build = randomBuild(for: role, rng: &rng)
@@ -610,47 +1283,17 @@ enum RobotFactory {
         return configs
     }
 
-    // MARK: - Balanced Stats
+    // MARK: - Stats Calculation
 
     static func statsForBuild(_ build: RobotBuild, role: RobotRole, boost: Bool) -> RobotStats {
         let b: Float = boost ? 0.1 : 0.0
 
-        // --- Drivetrain base ---
-        let baseSpeed: Float
-        let baseTurn: Float
-        let baseAccel: Float
-        let baseReliability: Double
-        let basePush: Float
-        let deepClimb: Bool
+        let dt = build.drivetrain
+        let fr = build.frame
+        let mp = build.manipulator
+        let ink = build.intake
 
-        switch build.drivetrain {
-        case .swerve:
-            baseSpeed = 2.3; baseTurn = 3.5; baseAccel = 2.0
-            baseReliability = 0.84; basePush = 0.3; deepClimb = false
-        case .tank:
-            baseSpeed = 1.85; baseTurn = 1.8; baseAccel = 1.5
-            baseReliability = 0.94; basePush = 1.0; deepClimb = true
-        }
-
-        // --- Mechanism modifiers ---
-        let mechSpeedMod: Float
-        let mechScoringTime: Double
-        let mechReliabilityMod: Double
-        switch build.mechanism {
-        case .elevator: mechSpeedMod = -0.25; mechScoringTime = 1.6; mechReliabilityMod = -0.05
-        case .arm:      mechSpeedMod = -0.10; mechScoringTime = 1.2; mechReliabilityMod =  0.0
-        case .simple:   mechSpeedMod =  0.15; mechScoringTime = 0.6; mechReliabilityMod =  0.05
-        }
-
-        // --- Intake modifiers ---
-        let pickupTime: Double
-        let intakeReliabilityMod: Double
-        switch build.intake {
-        case .claw:   pickupTime = 1.0; intakeReliabilityMod =  0.08
-        case .roller: pickupTime = 0.5; intakeReliabilityMod = -0.05
-        }
-
-        // --- Role adjustments ---
+        // Role adjustments
         let roleSpeedMod: Float
         let roleScoringMod: Double
         switch role {
@@ -659,75 +1302,77 @@ enum RobotFactory {
         case .defender: roleSpeedMod =  0.30; roleScoringMod =  0.30
         }
 
+        let totalWeight = dt.weight + fr.weightValue + mp.weightValue + ink.weightValue
+        let weightPenalty: Float = max(0, (totalWeight - 35) * 0.01)
+
+        let finalSpeed = max(1.0, dt.baseSpeed + fr.speedModifier + mp.speedModifier + roleSpeedMod + b - weightPenalty)
         let finalReliability = min(0.98, max(0.50,
-            baseReliability + mechReliabilityMod + intakeReliabilityMod))
+            Double(dt.baseReliability + fr.reliabilityModifier + mp.reliabilityModifier + ink.reliabilityModifier)))
 
         return RobotStats(
-            maxSpeed: max(1.0, baseSpeed + mechSpeedMod + roleSpeedMod + b),
-            acceleration: baseAccel,
-            turnRate: baseTurn,
-            scoringTime: max(0.4, mechScoringTime + roleScoringMod),
-            pickupTime: pickupTime,
+            maxSpeed: finalSpeed,
+            acceleration: dt == .tank ? 1.5 : 2.0,
+            turnRate: dt.turnRate,
+            scoringTime: max(0.4, mp.scoringTime + roleScoringMod),
+            pickupTime: ink.pickupTime,
             reliability: finalReliability,
-            maxReefLevel: build.mechanism.maxLevel,
-            pushPower: basePush,
-            canDeepClimb: deepClimb
+            maxReachHeight: mp.maxReach,
+            pushPower: dt.pushPower,
+            canDeepClimb: dt.canDeepClimb,
+            canStrafe: dt.canStrafe,
+            canShoot: mp.canShoot,
+            totalWeight: totalWeight
         )
     }
 
-    // MARK: - Randomized Build Generation
+    // MARK: - Random Build
 
     private static func randomBuild(for role: RobotRole, rng: inout SeededRNG) -> RobotBuild {
-        let dt: DrivetrainType
-        let mech: MechanismType
-        let intake: IntakeType
+        let dts = DrivetrainChoice.allCases
+        let frs = FrameChoice.allCases
+        let mps = ManipulatorChoice.allCases
+        let inks = IntakeChoice.allCases
+
+        let dt: DrivetrainChoice
+        let mp: ManipulatorChoice
 
         switch role {
         case .scorer:
-            // Scorers lean toward higher mechanisms
-            dt = rng.nextDouble() < 0.5 ? .swerve : .tank
-            let mr = rng.nextDouble()
-            mech = mr < 0.45 ? .elevator : (mr < 0.80 ? .arm : .simple)
-            intake = rng.nextDouble() < 0.60 ? .claw : .roller
-
+            dt = rng.nextDouble() < 0.4 ? .swerve : (rng.nextDouble() < 0.7 ? .tank : .mecanum)
+            let r = rng.nextDouble()
+            mp = r < 0.40 ? .elevator : (r < 0.75 ? .arm : (r < 0.90 ? .shooter : .simple))
         case .cycler:
-            // Cyclers lean toward speed + lower mechanisms
-            dt = rng.nextDouble() < 0.55 ? .swerve : .tank
-            let mr = rng.nextDouble()
-            mech = mr < 0.15 ? .elevator : (mr < 0.50 ? .arm : .simple)
-            intake = rng.nextDouble() < 0.35 ? .claw : .roller
-
+            dt = rng.nextDouble() < 0.50 ? .swerve : (rng.nextDouble() < 0.7 ? .mecanum : .tank)
+            let r = rng.nextDouble()
+            mp = r < 0.10 ? .elevator : (r < 0.40 ? .arm : (r < 0.55 ? .shooter : .simple))
         case .defender:
-            // Defenders lean toward tank + simple
-            dt = rng.nextDouble() < 0.30 ? .swerve : .tank
-            let mr = rng.nextDouble()
-            mech = mr < 0.10 ? .elevator : (mr < 0.40 ? .arm : .simple)
-            intake = rng.nextDouble() < 0.40 ? .claw : .roller
+            dt = rng.nextDouble() < 0.20 ? .swerve : (rng.nextDouble() < 0.3 ? .mecanum : .tank)
+            let r = rng.nextDouble()
+            mp = r < 0.05 ? .elevator : (r < 0.25 ? .arm : (r < 0.30 ? .shooter : .simple))
         }
 
-        return RobotBuild(drivetrain: dt, mechanism: mech, intake: intake)
+        let fr = frs[rng.nextInt(0..<frs.count)]
+        let ink = inks[rng.nextInt(0..<inks.count)]
+
+        return RobotBuild(drivetrain: dt, frame: fr, manipulator: mp, intake: ink)
     }
 
     static func superstructureFor(_ build: RobotBuild, role: RobotRole) -> SuperstructureType {
-        if role == .defender && build.mechanism == .simple { return .wedge }
-        switch build.mechanism {
+        if role == .defender && build.manipulator == .simple { return .wedge }
+        switch build.manipulator {
         case .elevator: return .elevator
         case .arm:      return .arm
+        case .shooter:  return .shooter
         case .simple:   return .intake
         }
     }
 
-    /// Build a preview config for the 3D robot preview on the build page.
     static func previewConfig(build: RobotBuild, role: RobotRole = .scorer) -> RobotConfig {
         RobotConfig(
-            id: 99,
-            alliance: .red,
-            role: role,
+            id: 99, alliance: .red, role: role,
             stats: statsForBuild(build, role: role, boost: false),
             superstructure: superstructureFor(build, role: role),
-            build: build,
-            teamNumber: "0000",
-            startPosition: SIMD2(0, 0)
+            build: build, teamNumber: "0000", startPosition: SIMD2(0, 0)
         )
     }
 
