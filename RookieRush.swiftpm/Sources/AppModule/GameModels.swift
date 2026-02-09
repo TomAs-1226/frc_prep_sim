@@ -1974,7 +1974,7 @@ struct PartTuning: Equatable {
             maxSpeed: max(1.0, stats.maxSpeed + speedMod),
             acceleration: stats.acceleration,
             turnRate: stats.turnRate,
-            scoringTime: max(0.3, stats.scoringTime - scoringMod),
+            scoringTime: max(0.3, stats.scoringTime - Double(scoringMod)),
             pickupTime: stats.pickupTime,
             reliability: min(0.98, max(0.50, stats.reliability + Double(reliabilityMod))),
             maxReachHeight: stats.maxReachHeight,
