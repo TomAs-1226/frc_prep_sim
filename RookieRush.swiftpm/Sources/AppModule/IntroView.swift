@@ -4,8 +4,11 @@ import SwiftUI
 
 /// Welcome screen that introduces the Rookie Workshop concept and starts the flow.
 struct IntroView: View {
+    @ObservedObject var profileManager: ProfileManager
     let onStart: () -> Void
     @State private var appeared = false
+
+    private var profile: PlayerProfile { profileManager.profile }
 
     var body: some View {
         ZStack {
@@ -40,6 +43,14 @@ struct IntroView: View {
                         .tracking(1)
                 }
 
+                // Player stats (shown after first match)
+                if profile.totalRounds > 0 {
+                    playerStatsBar
+                        .padding(.horizontal, 24)
+                        .offset(y: appeared ? 0 : 10)
+                        .opacity(appeared ? 1 : 0)
+                }
+
                 // Step cards
                 VStack(spacing: 14) {
                     stepCard(number: "1", title: "Analyze the Game",
@@ -61,8 +72,8 @@ struct IntroView: View {
                 // Start button
                 Button(action: onStart) {
                     HStack(spacing: 10) {
-                        Image(systemName: "hammer.fill")
-                        Text("Start Building")
+                        Image(systemName: profile.totalRounds > 0 ? "arrow.counterclockwise" : "hammer.fill")
+                        Text(profile.totalRounds > 0 ? "Next Round" : "Start Building")
                             .font(.headline)
                     }
                     .foregroundStyle(.black)
@@ -86,6 +97,37 @@ struct IntroView: View {
         .onAppear {
             withAnimation(.easeOut(duration: 0.6)) { appeared = true }
         }
+    }
+
+    // MARK: - Player Stats Bar
+
+    private var playerStatsBar: some View {
+        HStack(spacing: 0) {
+            quickStat(value: "\(profile.wins)", label: "Wins", color: .green)
+            Divider().background(Color.white.opacity(0.1)).frame(height: 24)
+            quickStat(value: "\(profile.totalRounds)", label: "Rounds", color: .orange)
+            Divider().background(Color.white.opacity(0.1)).frame(height: 24)
+            quickStat(value: "\(profile.bestBuildScore)", label: "Best Build", color: .cyan)
+            Divider().background(Color.white.opacity(0.1)).frame(height: 24)
+            quickStat(value: "\(profile.winStreak)", label: "Streak", color: .yellow)
+        }
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.white.opacity(0.04))
+        )
+    }
+
+    private func quickStat(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 16, weight: .black, design: .rounded))
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.white.opacity(0.4))
+        }
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder

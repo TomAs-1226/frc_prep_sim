@@ -108,6 +108,7 @@ struct RobotPreviewView: UIViewRepresentable {
 /// then build their robot to match it, then choose strategy and role.
 struct PreMatchView: View {
     let game: GeneratedGame
+    @ObservedObject var profileManager: ProfileManager
     let onReady: (AllianceStrategy, RobotRole, RobotBuild, AutoPlan) -> Void
 
     @State private var step = 0
@@ -366,17 +367,28 @@ struct PreMatchView: View {
                 sectionLabel("Drivetrain", icon: "gearshape.2.fill")
 
                 ForEach(DrivetrainChoice.allCases) { dt in
+                    let unlocked = profileManager.profile.isUnlocked(dt)
                     VStack(spacing: 0) {
                         selectionCard(
                             title: dt.rawValue,
-                            icon: dt.icon,
-                            description: dt.description,
+                            icon: unlocked ? dt.icon : "lock.fill",
+                            description: unlocked ? dt.description : "Unlocks at Level \(dt.unlockLevel)",
                             color: dt.color,
-                            isSelected: selectedBuild.drivetrain == dt
+                            isSelected: selectedBuild.drivetrain == dt && unlocked
                         ) {
-                            withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.drivetrain = dt }
+                            if unlocked {
+                                withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.drivetrain = dt }
+                            }
                         }
-                        prosConsRow(pros: dt.pros, cons: dt.cons)
+                        if unlocked {
+                            prosConsRow(pros: dt.pros, cons: dt.cons)
+                        }
+                    }
+                    .opacity(unlocked ? 1.0 : 0.35)
+                    .overlay(alignment: .trailing) {
+                        if !unlocked {
+                            lockBadge(level: dt.unlockLevel)
+                        }
                     }
                 }
             }
@@ -386,17 +398,28 @@ struct PreMatchView: View {
                 sectionLabel("Frame", icon: "square.grid.3x3")
 
                 ForEach(FrameChoice.allCases) { fr in
+                    let unlocked = profileManager.profile.isUnlocked(fr)
                     VStack(spacing: 0) {
                         selectionCard(
                             title: fr.rawValue,
-                            icon: fr.icon,
-                            description: fr.description,
+                            icon: unlocked ? fr.icon : "lock.fill",
+                            description: unlocked ? fr.description : "Unlocks at Level \(fr.unlockLevel)",
                             color: fr.color,
-                            isSelected: selectedBuild.frame == fr
+                            isSelected: selectedBuild.frame == fr && unlocked
                         ) {
-                            withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.frame = fr }
+                            if unlocked {
+                                withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.frame = fr }
+                            }
                         }
-                        prosConsRow(pros: fr.pros, cons: fr.cons)
+                        if unlocked {
+                            prosConsRow(pros: fr.pros, cons: fr.cons)
+                        }
+                    }
+                    .opacity(unlocked ? 1.0 : 0.35)
+                    .overlay(alignment: .trailing) {
+                        if !unlocked {
+                            lockBadge(level: fr.unlockLevel)
+                        }
                     }
                 }
             }
@@ -406,41 +429,52 @@ struct PreMatchView: View {
                 sectionLabel("Manipulator", icon: "arrow.up.and.down")
 
                 ForEach(ManipulatorChoice.allCases) { manip in
+                    let unlocked = profileManager.profile.isUnlocked(manip)
                     VStack(spacing: 0) {
                         selectionCard(
                             title: manip.rawValue,
-                            icon: manip.icon,
-                            description: manip.description,
+                            icon: unlocked ? manip.icon : "lock.fill",
+                            description: unlocked ? manip.description : "Unlocks at Level \(manip.unlockLevel)",
                             color: manip.color,
-                            isSelected: selectedBuild.manipulator == manip
+                            isSelected: selectedBuild.manipulator == manip && unlocked
                         ) {
-                            withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.manipulator = manip }
-                        }
-
-                        // Level reach indicator
-                        HStack(spacing: 8) {
-                            Text("Reaches:")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.white.opacity(0.4))
-                            ForEach(ScoringHeight.allCases, id: \.self) { h in
-                                Text(h.displayName)
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(
-                                        h <= manip.maxReach ? manip.color : .white.opacity(0.15)
-                                    )
-                            }
-                            Spacer()
-
-                            if game.maxScoringHeight > manip.maxReach {
-                                Text("Can't reach \(game.maxScoringHeight.displayName)!")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(.red.opacity(0.7))
+                            if unlocked {
+                                withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.manipulator = manip }
                             }
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 2)
 
-                        prosConsRow(pros: manip.pros, cons: manip.cons)
+                        if unlocked {
+                            // Level reach indicator
+                            HStack(spacing: 8) {
+                                Text("Reaches:")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.white.opacity(0.4))
+                                ForEach(ScoringHeight.allCases, id: \.self) { h in
+                                    Text(h.displayName)
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(
+                                            h <= manip.maxReach ? manip.color : .white.opacity(0.15)
+                                        )
+                                }
+                                Spacer()
+
+                                if game.maxScoringHeight > manip.maxReach {
+                                    Text("Can't reach \(game.maxScoringHeight.displayName)!")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(.red.opacity(0.7))
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 2)
+
+                            prosConsRow(pros: manip.pros, cons: manip.cons)
+                        }
+                    }
+                    .opacity(unlocked ? 1.0 : 0.35)
+                    .overlay(alignment: .trailing) {
+                        if !unlocked {
+                            lockBadge(level: manip.unlockLevel)
+                        }
                     }
                 }
             }
@@ -450,34 +484,45 @@ struct PreMatchView: View {
                 sectionLabel("Intake", icon: "hand.point.up.fill")
 
                 ForEach(IntakeChoice.allCases) { intake in
+                    let unlocked = profileManager.profile.isUnlocked(intake)
                     VStack(spacing: 0) {
                         selectionCard(
                             title: intake.rawValue,
-                            icon: intake.icon,
-                            description: intake.description,
+                            icon: unlocked ? intake.icon : "lock.fill",
+                            description: unlocked ? intake.description : "Unlocks at Level \(intake.unlockLevel)",
                             color: intake.color,
-                            isSelected: selectedBuild.intake == intake
+                            isSelected: selectedBuild.intake == intake && unlocked
                         ) {
-                            withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.intake = intake }
-                        }
-
-                        // Ideal piece match indicator
-                        let idealPieces = game.gamePieces.filter { $0.idealIntake == intake }
-                        if !idealPieces.isEmpty {
-                            HStack(spacing: 4) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.green.opacity(0.7))
-                                Text("Ideal for: \(idealPieces.map(\.rawValue).joined(separator: ", "))")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.green.opacity(0.6))
-                                Spacer()
+                            if unlocked {
+                                withAnimation(.easeInOut(duration: 0.2)) { selectedBuild.intake = intake }
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 2)
                         }
 
-                        prosConsRow(pros: intake.pros, cons: intake.cons)
+                        if unlocked {
+                            // Ideal piece match indicator
+                            let idealPieces = game.gamePieces.filter { $0.idealIntake == intake }
+                            if !idealPieces.isEmpty {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.green.opacity(0.7))
+                                    Text("Ideal for: \(idealPieces.map(\.rawValue).joined(separator: ", "))")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.green.opacity(0.6))
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 2)
+                            }
+
+                            prosConsRow(pros: intake.pros, cons: intake.cons)
+                        }
+                    }
+                    .opacity(unlocked ? 1.0 : 0.35)
+                    .overlay(alignment: .trailing) {
+                        if !unlocked {
+                            lockBadge(level: intake.unlockLevel)
+                        }
                     }
                 }
             }
@@ -506,6 +551,7 @@ struct PreMatchView: View {
 
             tipBanner(text: "Every build has tradeoffs! Match your manipulator's reach to the game's scoring heights and your intake to the game pieces for the best Field Match Score.")
         }
+        .onAppear { validateBuildUnlocks() }
     }
 
     // MARK: - Field Match Score Gauge
@@ -980,6 +1026,41 @@ struct PreMatchView: View {
         case .moderate: return "Med"
         case .risky: return "High"
         }
+    }
+
+    // MARK: - Part Unlock Helpers
+
+    private func validateBuildUnlocks() {
+        let profile = profileManager.profile
+        if !profile.isUnlocked(selectedBuild.drivetrain) {
+            selectedBuild.drivetrain = DrivetrainChoice.allCases.first { profile.isUnlocked($0) } ?? .tank
+        }
+        if !profile.isUnlocked(selectedBuild.frame) {
+            selectedBuild.frame = FrameChoice.allCases.first { profile.isUnlocked($0) } ?? .aluminum
+        }
+        if !profile.isUnlocked(selectedBuild.manipulator) {
+            selectedBuild.manipulator = ManipulatorChoice.allCases.first { profile.isUnlocked($0) } ?? .simple
+        }
+        if !profile.isUnlocked(selectedBuild.intake) {
+            selectedBuild.intake = IntakeChoice.allCases.first { profile.isUnlocked($0) } ?? .roller
+        }
+    }
+
+    @ViewBuilder
+    private func lockBadge(level: Int) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 10))
+            Text("Lv. \(level)")
+                .font(.system(size: 10, weight: .bold))
+        }
+        .foregroundStyle(.white.opacity(0.7))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            Capsule().fill(Color.black.opacity(0.6))
+        )
+        .padding(.trailing, 14)
     }
 
     @ViewBuilder

@@ -468,6 +468,10 @@ enum DrivetrainChoice: String, CaseIterable, Identifiable {
     var canStrafe: Bool {
         switch self { case .swerve: return true; case .tank: return false; case .mecanum: return true }
     }
+
+    var unlockLevel: Int {
+        switch self { case .tank: return 1; case .mecanum: return 3; case .swerve: return 8 }
+    }
 }
 
 // MARK: - Frame
@@ -527,6 +531,10 @@ enum FrameChoice: String, CaseIterable, Identifiable {
     }
     var weightValue: Float {
         switch self { case .aluminum: return 10; case .steel: return 14; case .composite: return 7 }
+    }
+
+    var unlockLevel: Int {
+        switch self { case .aluminum: return 1; case .composite: return 5; case .steel: return 10 }
     }
 }
 
@@ -607,6 +615,10 @@ enum ManipulatorChoice: String, CaseIterable, Identifiable {
     var canShoot: Bool { self == .shooter }
 
     var maxLevel: Int { maxReach.rawValue }
+
+    var unlockLevel: Int {
+        switch self { case .simple: return 1; case .arm: return 4; case .shooter: return 9; case .elevator: return 13 }
+    }
 }
 
 // MARK: - Intake
@@ -668,6 +680,10 @@ enum IntakeChoice: String, CaseIterable, Identifiable {
 
     var weightValue: Float {
         switch self { case .roller: return 3; case .claw: return 4; case .pneumatic: return 6 }
+    }
+
+    var unlockLevel: Int {
+        switch self { case .roller: return 1; case .claw: return 6; case .pneumatic: return 11 }
     }
 }
 
@@ -1390,5 +1406,311 @@ enum RobotFactory {
         case .balanced:   return playerRole == .defender ? .scorer : .cycler
         case .defensive:  return .cycler
         }
+    }
+}
+
+// ============================================================================
+// MARK: - Progression System
+// ============================================================================
+
+// MARK: - Round Record
+
+struct RoundRecord: Codable, Identifiable {
+    let id: UUID
+    let gameName: String
+    let archetype: String
+    let buildMatchScore: Int
+    let won: Bool
+    let tied: Bool
+    let redScore: Int
+    let blueScore: Int
+    let date: Date
+
+    init(from result: MatchResult) {
+        self.id = UUID()
+        self.gameName = result.game.name
+        self.archetype = result.game.archetype.rawValue
+        self.buildMatchScore = result.buildMatchScore
+        self.won = result.playerWon
+        self.tied = result.margin == 0
+        self.redScore = result.redScore
+        self.blueScore = result.blueScore
+        self.date = Date()
+    }
+}
+
+// MARK: - Achievement
+
+enum Achievement: String, CaseIterable, Identifiable, Codable {
+    case firstMatch     = "Rookie"
+    case firstWin       = "Victor"
+    case analyzer       = "Analyzer"
+    case perfectBuild   = "Perfect Engineer"
+    case strategist     = "Strategist"
+    case speedDemon     = "Speed Demon"
+    case skyReacher     = "Sky Reacher"
+    case winStreak5     = "On Fire"
+    case veteran        = "Veteran"
+    case masterBuilder  = "Master Builder"
+    case fullArsenal    = "Full Arsenal"
+    case comebacker     = "Comeback Kid"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .firstMatch:    return "star.fill"
+        case .firstWin:      return "trophy.fill"
+        case .analyzer:      return "magnifyingglass"
+        case .perfectBuild:  return "wrench.and.screwdriver.fill"
+        case .strategist:    return "megaphone.fill"
+        case .speedDemon:    return "hare.fill"
+        case .skyReacher:    return "arrow.up.circle.fill"
+        case .winStreak5:    return "flame.fill"
+        case .veteran:       return "shield.fill"
+        case .masterBuilder: return "hammer.fill"
+        case .fullArsenal:   return "shippingbox.fill"
+        case .comebacker:    return "arrow.turn.up.right"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .firstMatch:    return "Complete your first match"
+        case .firstWin:      return "Win a match"
+        case .analyzer:      return "Score 75+ on build match"
+        case .perfectBuild:  return "Score 90+ on build match"
+        case .strategist:    return "Use 3+ callouts in a match"
+        case .speedDemon:    return "Win a Speed Rush game"
+        case .skyReacher:    return "Win a Vertical Challenge game"
+        case .winStreak5:    return "Win 5 matches in a row"
+        case .veteran:       return "Play 10 rounds"
+        case .masterBuilder: return "Reach level 10"
+        case .fullArsenal:   return "Unlock all robot parts"
+        case .comebacker:    return "Win after trailing by 10+"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .firstMatch:    return .gray
+        case .firstWin:      return .yellow
+        case .analyzer:      return .cyan
+        case .perfectBuild:  return .purple
+        case .strategist:    return .orange
+        case .speedDemon:    return .mint
+        case .skyReacher:    return .indigo
+        case .winStreak5:    return .red
+        case .veteran:       return .green
+        case .masterBuilder: return .blue
+        case .fullArsenal:   return .pink
+        case .comebacker:    return .teal
+        }
+    }
+
+    var xpReward: Int { 50 }
+}
+
+// MARK: - XP Rewards
+
+enum XPReward {
+    static let matchComplete = 20
+    static let matchWin = 30
+    static let buildScoreBonus = 1  // per build match point above 50
+    static let calloutUsed = 5
+    static let noStall = 10
+    static let achievementBonus = 50
+
+    static func calculate(from result: MatchResult) -> (total: Int, breakdown: [(String, Int)]) {
+        var items: [(String, Int)] = []
+        items.append(("Match Complete", matchComplete))
+        if result.playerWon {
+            items.append(("Victory Bonus", matchWin))
+        }
+        if result.buildMatchScore > 50 {
+            let bonus = (result.buildMatchScore - 50) * buildScoreBonus
+            items.append(("Build Match (\(result.buildMatchScore)/100)", bonus))
+        }
+        if !result.calloutsUsed.isEmpty {
+            let bonus = result.calloutsUsed.count * calloutUsed
+            items.append(("Callouts Used (\(result.calloutsUsed.count))", bonus))
+        }
+        if !result.didPlayerStall {
+            items.append(("No Stalls", noStall))
+        }
+        let total = items.reduce(0) { $0 + $1.1 }
+        return (total, items)
+    }
+}
+
+// MARK: - Player Profile
+
+struct PlayerProfile: Codable, Equatable {
+    var level: Int = 1
+    var xp: Int = 0
+    var totalRounds: Int = 0
+    var wins: Int = 0
+    var losses: Int = 0
+    var ties: Int = 0
+    var bestBuildScore: Int = 0
+    var totalBuildScore: Int = 0
+    var winStreak: Int = 0
+    var bestWinStreak: Int = 0
+    var earnedAchievements: Set<String> = []
+    var roundHistory: [RoundRecord] = []
+
+    var averageBuildScore: Int {
+        totalRounds > 0 ? totalBuildScore / totalRounds : 0
+    }
+
+    var xpForNextLevel: Int { level * 80 + 40 }
+    var xpProgress: Double { Double(xp) / Double(xpForNextLevel) }
+
+    var winRate: Double {
+        totalRounds > 0 ? Double(wins) / Double(totalRounds) * 100 : 0
+    }
+
+    mutating func addXP(_ amount: Int) -> Bool {
+        xp += amount
+        var didLevel = false
+        while xp >= xpForNextLevel {
+            xp -= xpForNextLevel
+            level += 1
+            didLevel = true
+        }
+        return didLevel
+    }
+
+    func isUnlocked(_ drivetrain: DrivetrainChoice) -> Bool { level >= drivetrain.unlockLevel }
+    func isUnlocked(_ frame: FrameChoice) -> Bool { level >= frame.unlockLevel }
+    func isUnlocked(_ manipulator: ManipulatorChoice) -> Bool { level >= manipulator.unlockLevel }
+    func isUnlocked(_ intake: IntakeChoice) -> Bool { level >= intake.unlockLevel }
+
+    var allPartsUnlocked: Bool {
+        DrivetrainChoice.allCases.allSatisfy { isUnlocked($0) } &&
+        FrameChoice.allCases.allSatisfy { isUnlocked($0) } &&
+        ManipulatorChoice.allCases.allSatisfy { isUnlocked($0) } &&
+        IntakeChoice.allCases.allSatisfy { isUnlocked($0) }
+    }
+
+    var hasAchievement: (Achievement) -> Bool {
+        { [earnedAchievements] a in earnedAchievements.contains(a.rawValue) }
+    }
+
+    mutating func recordMatch(_ result: MatchResult) {
+        totalRounds += 1
+        totalBuildScore += result.buildMatchScore
+        bestBuildScore = max(bestBuildScore, result.buildMatchScore)
+
+        if result.playerWon {
+            wins += 1
+            winStreak += 1
+            bestWinStreak = max(bestWinStreak, winStreak)
+        } else if result.margin == 0 {
+            ties += 1
+            winStreak = 0
+        } else {
+            losses += 1
+            winStreak = 0
+        }
+
+        let record = RoundRecord(from: result)
+        roundHistory.insert(record, at: 0)
+        if roundHistory.count > 20 { roundHistory = Array(roundHistory.prefix(20)) }
+    }
+
+    mutating func checkAchievements(result: MatchResult) -> [Achievement] {
+        var newlyEarned: [Achievement] = []
+
+        let checks: [(Achievement, Bool)] = [
+            (.firstMatch, totalRounds >= 1),
+            (.firstWin, wins >= 1),
+            (.analyzer, result.buildMatchScore >= 75),
+            (.perfectBuild, result.buildMatchScore >= 90),
+            (.strategist, result.calloutsUsed.count >= 3),
+            (.speedDemon, result.playerWon && result.game.archetype == .speed),
+            (.skyReacher, result.playerWon && result.game.archetype == .vertical),
+            (.winStreak5, winStreak >= 5),
+            (.veteran, totalRounds >= 10),
+            (.masterBuilder, level >= 10),
+            (.fullArsenal, allPartsUnlocked),
+            (.comebacker, result.playerWon && result.calloutEvents.contains {
+                $0.redScoreAtTime < $0.blueScoreAtTime - 10
+            }),
+        ]
+
+        for (achievement, condition) in checks {
+            if condition && !earnedAchievements.contains(achievement.rawValue) {
+                earnedAchievements.insert(achievement.rawValue)
+                newlyEarned.append(achievement)
+            }
+        }
+
+        return newlyEarned
+    }
+}
+
+// MARK: - Profile Manager
+
+@MainActor
+final class ProfileManager: ObservableObject {
+    @Published var profile: PlayerProfile
+
+    private static let storageKey = "playerProfile"
+
+    init() {
+        if let data = UserDefaults.standard.data(forKey: Self.storageKey),
+           let decoded = try? JSONDecoder().decode(PlayerProfile.self, from: data) {
+            self.profile = decoded
+        } else {
+            self.profile = PlayerProfile()
+        }
+    }
+
+    func save() {
+        if let data = try? JSONEncoder().encode(profile) {
+            UserDefaults.standard.set(data, forKey: Self.storageKey)
+        }
+    }
+
+    struct MatchRewards {
+        let xpTotal: Int
+        let xpBreakdown: [(String, Int)]
+        let didLevelUp: Bool
+        let newLevel: Int
+        let newAchievements: [Achievement]
+    }
+
+    func processMatchResult(_ result: MatchResult) -> MatchRewards {
+        profile.recordMatch(result)
+
+        let (xpTotal, xpBreakdown) = XPReward.calculate(from: result)
+        let newAchievements = profile.checkAchievements(result: result)
+        let achievementXP = newAchievements.count * XPReward.achievementBonus
+        let totalXP = xpTotal + achievementXP
+        let didLevel = profile.addXP(totalXP)
+
+        // Check master builder achievement after level-up
+        _ = profile.checkAchievements(result: result)
+
+        save()
+
+        var fullBreakdown = xpBreakdown
+        for a in newAchievements {
+            fullBreakdown.append(("Achievement: \(a.rawValue)", a.xpReward))
+        }
+
+        return MatchRewards(
+            xpTotal: totalXP,
+            xpBreakdown: fullBreakdown,
+            didLevelUp: didLevel,
+            newLevel: profile.level,
+            newAchievements: newAchievements
+        )
+    }
+
+    func resetProfile() {
+        profile = PlayerProfile()
+        save()
     }
 }

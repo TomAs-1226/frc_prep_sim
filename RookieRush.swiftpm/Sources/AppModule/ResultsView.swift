@@ -5,11 +5,15 @@ import SwiftUI
 /// Post-match results with score breakdown, build match analysis, and AI coaching feedback.
 struct ResultsView: View {
     let result: MatchResult
+    @ObservedObject var profileManager: ProfileManager
     let onTryAgain: () -> Void
 
     @StateObject private var coach = AICoach()
     @State private var showBreakdown = false
     @State private var animateScore = false
+    @State private var rewards: ProfileManager.MatchRewards?
+    @State private var showLevelUp = false
+    @State private var showXP = false
 
     var body: some View {
         ZStack {
@@ -32,6 +36,17 @@ struct ResultsView: View {
 
                     buildMatchSection
                         .padding(.horizontal, 20)
+
+                    xpSection
+                        .padding(.horizontal, 20)
+                        .opacity(showXP ? 1 : 0)
+                        .offset(y: showXP ? 0 : 10)
+
+                    if let rewards = rewards, !rewards.newAchievements.isEmpty {
+                        achievementSection(achievements: rewards.newAchievements)
+                            .padding(.horizontal, 20)
+                            .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    }
 
                     scoreComparison
                         .padding(.horizontal, 20)
@@ -79,13 +94,32 @@ struct ResultsView: View {
             }
         }
         .onAppear {
+            let r = profileManager.processMatchResult(result)
+            rewards = r
+
             withAnimation(.spring(response: 0.6, dampingFraction: 0.7).delay(0.2)) {
                 animateScore = true
+            }
+            withAnimation(.easeOut(duration: 0.4).delay(0.5)) {
+                showXP = true
             }
             withAnimation(.easeOut(duration: 0.5).delay(0.6)) {
                 showBreakdown = true
             }
+            if r.didLevelUp {
+                withAnimation(.spring(response: 0.6).delay(1.2)) {
+                    showLevelUp = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
+                    withAnimation { showLevelUp = false }
+                }
+            }
             Task { await coach.generateFeedback(for: result) }
+        }
+        .overlay {
+            if showLevelUp, let r = rewards {
+                levelUpOverlay(level: r.newLevel)
+            }
         }
     }
 
@@ -491,24 +525,23 @@ struct ResultsView: View {
             )
 
             // Endgame fit
-            let endgameFit: Bool
-            let endgameDetail: String
-            switch result.game.endgameChallenge {
-            case .climb(let difficulty, _):
-                if difficulty == .high {
-                    endgameFit = result.playerBuild.drivetrain.canDeepClimb
-                    endgameDetail = "High climb needs Tank Drive deep climb"
-                } else {
-                    endgameFit = true
-                    endgameDetail = "\(difficulty.rawValue) is accessible to all drivetrains"
+            let (endgameFit, endgameDetail): (Bool, String) = {
+                switch result.game.endgameChallenge {
+                case .climb(let difficulty, _):
+                    if difficulty == .high {
+                        return (result.playerBuild.drivetrain.canDeepClimb,
+                                "High climb needs Tank Drive deep climb")
+                    } else {
+                        return (true,
+                                "\(difficulty.rawValue) is accessible to all drivetrains")
+                    }
+                case .balance:
+                    return (result.playerBuild.drivetrain.canStrafe,
+                            "Balance favors strafing (Swerve/Mecanum)")
+                case .park:
+                    return (true, "Simple park -- no special build needed")
                 }
-            case .balance:
-                endgameFit = result.playerBuild.drivetrain.canStrafe
-                endgameDetail = "Balance favors strafing (Swerve/Mecanum)"
-            case .park:
-                endgameFit = true
-                endgameDetail = "Simple park -- no special build needed"
-            }
+            }()
             analysisRow(
                 icon: result.game.endgameChallenge.icon,
                 label: "Endgame Fit",
@@ -780,6 +813,181 @@ struct ResultsView: View {
         let m = Int(remaining) / 60
         let s = Int(remaining) % 60
         return String(format: "%d:%02d", m, s)
+    }
+
+    // MARK: - XP Section
+
+    @ViewBuilder
+    private var xpSection: some View {
+        VStack(spacing: 10) {
+            Text("XP EARNED")
+                .font(.caption.bold())
+                .foregroundStyle(.white.opacity(0.4))
+                .tracking(1)
+
+            if let rewards = rewards {
+                // Total XP
+                Text("+\(rewards.xpTotal) XP")
+                    .font(.system(size: 28, weight: .black, design: .rounded))
+                    .foregroundStyle(.orange)
+
+                // Breakdown
+                VStack(spacing: 4) {
+                    ForEach(Array(rewards.xpBreakdown.enumerated()), id: \.offset) { _, item in
+                        HStack {
+                            Text(item.0)
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.6))
+                            Spacer()
+                            Text("+\(item.1)")
+                                .font(.caption.bold())
+                                .foregroundStyle(.orange.opacity(0.8))
+                        }
+                    }
+                }
+
+                // Level progress bar
+                VStack(spacing: 4) {
+                    HStack {
+                        Text("Level \(profileManager.profile.level)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.7))
+                        Spacer()
+                        Text("\(profileManager.profile.xp) / \(profileManager.profile.xpForNextLevel) XP")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.white.opacity(0.08))
+                                .frame(height: 6)
+                            Capsule()
+                                .fill(Color.orange)
+                                .frame(width: max(2, geo.size.width * profileManager.profile.xpProgress), height: 6)
+                                .animation(.easeOut(duration: 0.8), value: profileManager.profile.xpProgress)
+                        }
+                    }
+                    .frame(height: 6)
+                }
+                .padding(.top, 4)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.orange.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(Color.orange.opacity(0.15), lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - Achievement Section
+
+    @ViewBuilder
+    private func achievementSection(achievements: [Achievement]) -> some View {
+        VStack(spacing: 10) {
+            Text("ACHIEVEMENTS UNLOCKED")
+                .font(.caption.bold())
+                .foregroundStyle(.yellow.opacity(0.7))
+                .tracking(1)
+
+            ForEach(achievements) { achievement in
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(achievement.color.opacity(0.2))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: achievement.icon)
+                            .font(.body)
+                            .foregroundStyle(achievement.color)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(achievement.rawValue)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                        Text(achievement.description)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+
+                    Spacer()
+
+                    Text("+\(achievement.xpReward) XP")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.orange.opacity(0.12)))
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(achievement.color.opacity(0.04))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(achievement.color.opacity(0.2), lineWidth: 1)
+                        )
+                )
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.yellow.opacity(0.03))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(Color.yellow.opacity(0.1), lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - Level Up Overlay
+
+    @ViewBuilder
+    private func levelUpOverlay(level: Int) -> some View {
+        ZStack {
+            Color.black.opacity(0.5)
+                .ignoresSafeArea()
+
+            VStack(spacing: 12) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 60))
+                    .foregroundStyle(.orange)
+
+                Text("LEVEL UP!")
+                    .font(.system(size: 32, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+
+                Text("Level \(level)")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(.orange)
+
+                Text("New parts may be unlocked!")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            .padding(40)
+            .background(
+                RoundedRectangle(cornerRadius: 24)
+                    .fill(Color(red: 0.08, green: 0.06, blue: 0.14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 24)
+                            .strokeBorder(Color.orange.opacity(0.4), lineWidth: 2)
+                    )
+            )
+            .scaleEffect(showLevelUp ? 1 : 0.7)
+            .opacity(showLevelUp ? 1 : 0)
+        }
+        .onTapGesture {
+            withAnimation { showLevelUp = false }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Level up! You reached level \(level)")
     }
 
     // MARK: - Coaching Card

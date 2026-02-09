@@ -4,6 +4,7 @@ import SwiftUI
 
 /// User-configurable settings for simulation, AI, and accessibility.
 struct SettingsView: View {
+    @ObservedObject var profileManager: ProfileManager
     @Environment(\.dismiss) private var dismiss
     @AppStorage("simulationSpeed") private var simulationSpeed: Double = 2.0
     @AppStorage("soundEnabled") private var soundEnabled: Bool = true
@@ -11,6 +12,7 @@ struct SettingsView: View {
     @AppStorage("randomSeed") private var randomSeed: Int = 42
     @AppStorage("aiCoachingEnabled") private var aiCoachingEnabled: Bool = true
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = true
+    @State private var showResetAlert = false
 
     var body: some View {
         NavigationStack {
@@ -93,6 +95,12 @@ struct SettingsView: View {
                     }
                     .foregroundStyle(.red)
                     .accessibilityLabel("Reset onboarding to see the welcome screens again")
+
+                    Button("Reset Progress") {
+                        showResetAlert = true
+                    }
+                    .foregroundStyle(.red)
+                    .accessibilityLabel("Reset all progress including level, XP, and achievements")
                 } header: {
                     Label("About", systemImage: "info.circle.fill")
                 }
@@ -107,6 +115,14 @@ struct SettingsView: View {
                         .accessibilityLabel("Close settings")
                 }
             }
+        }
+        .alert("Reset Progress?", isPresented: $showResetAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) {
+                profileManager.resetProfile()
+            }
+        } message: {
+            Text("This will reset your level, XP, achievements, and round history. This cannot be undone.")
         }
     }
 }
