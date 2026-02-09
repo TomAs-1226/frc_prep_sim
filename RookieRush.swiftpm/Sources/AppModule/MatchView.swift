@@ -18,6 +18,9 @@ struct MatchView: View {
     @State private var sceneView: SCNView?
     @State private var scene: SCNScene?
     @State private var hasStarted = false
+    @State private var validationFailures: [RobotValidator.ValidationFailure] = []
+    @State private var showValidationOverlay = false
+    @State private var countdownValue: Int? = nil
 
     init(strategy: AllianceStrategy, playerRole: RobotRole, playerBuild: RobotBuild,
          autoPlan: AutoPlan, game: GeneratedGame,
@@ -32,7 +35,7 @@ struct MatchView: View {
         self.seriesRecord = seriesRecord
         self.onFinish = onFinish
 
-        let configs = RobotFactory.buildRobots(
+        let configs = RobotConfigFactory.buildRobots(
             playerRole: playerRole, strategy: strategy, playerBuild: playerBuild
         )
         _engine = StateObject(wrappedValue: MatchEngine(
@@ -47,6 +50,12 @@ struct MatchView: View {
             // 3D Scene
             MatchSceneView(engine: engine, onSceneReady: { s in
                 scene = s
+            }, onValidation: { failures in
+                let errors = failures.filter { $0.severity == .error }
+                if !errors.isEmpty {
+                    validationFailures = failures
+                    showValidationOverlay = true
+                }
             })
             .ignoresSafeArea()
 
@@ -142,17 +151,25 @@ struct MatchView: View {
             }
             .animation(.easeInOut(duration: 0.3), value: engine.isSlowMo)
 
+            // Countdown overlay
+            if let count = countdownValue {
+                countdownOverlay(count: count)
+            }
+
             // "Match Over" overlay
             if engine.isFinished {
                 matchOverOverlay
+            }
+
+            // Validation failure overlay (blocks simulation)
+            if showValidationOverlay {
+                validationOverlay
             }
         }
         .onAppear {
             if !hasStarted {
                 hasStarted = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    engine.start()
-                }
+                startWithCountdown()
             }
         }
         .onChange(of: engine.isFinished) { finished in
@@ -309,30 +326,128 @@ struct MatchView: View {
         .modifier(GlassModifier(shape: RoundedRectangle(cornerRadius: 16)))
     }
 
+    // MARK: - Countdown
+
+    private func startWithCountdown() {
+        countdownValue = 3
+        withAnimation(.easeInOut(duration: 0.3)) {}
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            withAnimation { countdownValue = 2 }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation { countdownValue = 1 }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            withAnimation {
+                countdownValue = nil
+                engine.start()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func countdownOverlay(count: Int) -> some View {
+        ZStack {
+            Color.black.opacity(0.5)
+                .ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                Text(game.name)
+                    .font(.headline.bold())
+                    .foregroundStyle(.orange)
+                    .tracking(1.5)
+
+                Text("\(count)")
+                    .font(.system(size: 80, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .scaleEffect(1.0)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.5), value: count)
+
+                Text("GET READY")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .tracking(3)
+            }
+        }
+        .transition(.opacity)
+    }
+
     // MARK: - Match Over Overlay
 
     @ViewBuilder
     private var matchOverOverlay: some View {
-        VStack(spacing: 12) {
-            Text("MATCH OVER")
-                .font(.title.bold())
-                .foregroundStyle(.white)
-            Text(engine.redScore > engine.blueScore ? "Red Alliance Wins!" :
-                    (engine.blueScore > engine.redScore ? "Blue Alliance Wins!" : "It's a Tie!"))
-                .font(.headline)
-                .foregroundStyle(engine.redScore >= engine.blueScore ? .red : Color(red: 0.3, green: 0.5, blue: 1.0))
+        ZStack {
+            Color.black.opacity(0.3)
+                .ignoresSafeArea()
 
-            Text("Loading results...")
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.4))
+            VStack(spacing: 12) {
+                Text("MATCH OVER")
+                    .font(.title.bold())
+                    .foregroundStyle(.white)
+                Text(engine.redScore > engine.blueScore ? "Red Alliance Wins!" :
+                        (engine.blueScore > engine.redScore ? "Blue Alliance Wins!" : "It's a Tie!"))
+                    .font(.headline)
+                    .foregroundStyle(engine.redScore >= engine.blueScore ? .red : Color(red: 0.3, green: 0.5, blue: 1.0))
+
+                Text("Loading results...")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+            .padding(30)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.black.opacity(0.8))
+            )
+            .modifier(GlassModifier(shape: RoundedRectangle(cornerRadius: 20)))
         }
-        .padding(30)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color.black.opacity(0.8))
-        )
-        .modifier(GlassModifier(shape: RoundedRectangle(cornerRadius: 20)))
         .transition(.scale.combined(with: .opacity))
+    }
+
+    // MARK: - Validation Overlay
+
+    @ViewBuilder
+    private var validationOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.85)
+                .ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 50))
+                    .foregroundStyle(.red)
+
+                Text("ROBOT MODEL VALIDATION FAILED")
+                    .font(.headline.bold())
+                    .foregroundStyle(.red)
+
+                Text("The simulation cannot proceed with broken models.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(validationFailures) { failure in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: failure.severity == .error
+                                      ? "xmark.circle.fill" : "exclamationmark.circle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(failure.severity == .error ? .red : .yellow)
+                                Text("[\(failure.severity.rawValue)] \(failure.description)")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.8))
+                            }
+                        }
+                    }
+                    .padding(12)
+                }
+                .frame(maxHeight: 300)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.white.opacity(0.05))
+                )
+            }
+            .padding(24)
+        }
     }
 }
 
@@ -341,16 +456,63 @@ struct MatchView: View {
 struct MatchSceneView: UIViewRepresentable {
     let engine: MatchEngine
     let onSceneReady: (SCNScene) -> Void
+    let onValidation: ([RobotValidator.ValidationFailure]) -> Void
 
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
         view.backgroundColor = .black
         view.antialiasingMode = .multisampling4X
-        view.allowsCameraControl = true  // Drag to orbit, pinch to zoom
+        view.allowsCameraControl = true
 
         let (scene, zoneNodes) = FieldBuilder.buildScene(game: engine.game)
-        let robotNodes = RobotBuilder.addRobots(to: scene, configs: engine.configs)
+        let robotNodes = RobotModelFactory.addRobots(to: scene, configs: engine.configs)
+
+        // Validate all robot models
+        var allFailures: [RobotValidator.ValidationFailure] = []
+        for robotNode in robotNodes {
+            let result = RobotValidator.validate(root: robotNode)
+            allFailures.append(contentsOf: result.failures)
+        }
+        if !allFailures.isEmpty {
+            onValidation(allFailures)
+        }
+
         engine.attach(scene: scene, robotNodes: robotNodes, zoneNodes: zoneNodes)
+
+        // Robot spawn-in animation: scale from 0 → 1 with a bounce
+        for (i, robotNode) in robotNodes.enumerated() {
+            robotNode.scale = SCNVector3(0.01, 0.01, 0.01)
+            let delay = Double(i) * 0.15
+            let scaleUp = SCNAction.scale(to: 1.1, duration: 0.3)
+            scaleUp.timingMode = .easeOut
+            let settle = SCNAction.scale(to: 1.0, duration: 0.15)
+            settle.timingMode = .easeInEaseOut
+            robotNode.runAction(SCNAction.sequence([
+                SCNAction.wait(duration: delay),
+                scaleUp,
+                settle
+            ]))
+        }
+
+        // Camera fly-in animation
+        if let cameraNode = scene.rootNode.childNodes.first(where: { $0.camera != nil }) {
+            let finalPos = cameraNode.position
+            let finalRot = cameraNode.eulerAngles
+            // Start higher and further back
+            cameraNode.position = SCNVector3(finalPos.x, finalPos.y + 3.0, finalPos.z + 4.0)
+            cameraNode.eulerAngles.x = finalRot.x - 0.3
+
+            let moveIn = SCNAction.move(to: finalPos, duration: 2.5)
+            moveIn.timingMode = .easeInEaseOut
+            cameraNode.runAction(moveIn)
+
+            let rotateIn = SCNAction.customAction(duration: 2.5) { node, elapsed in
+                let t = Float(elapsed / 2.5)
+                let eased = t * t * (3.0 - 2.0 * t) // smoothstep
+                node.eulerAngles.x = (finalRot.x - 0.3) + 0.3 * eased
+            }
+            cameraNode.runAction(rotateIn)
+        }
 
         view.scene = scene
         onSceneReady(scene)

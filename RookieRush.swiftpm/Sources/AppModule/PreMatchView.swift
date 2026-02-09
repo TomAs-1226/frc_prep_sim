@@ -74,23 +74,39 @@ struct RobotPreviewView: UIViewRepresentable {
     }
 
     private func buildAndAddRobot(to scene: SCNScene) {
-        let config = RobotFactory.previewConfig(build: build, role: role)
-        let robot = RobotBuilder.buildRobot(config: config)
+        let config = RobotConfigFactory.previewConfig(build: build, role: role)
+        let robot = RobotModelFactory.buildRobot(config: config)
         robot.name = "preview_robot"
         scene.rootNode.addChildNode(robot)
 
+        // Validate (same factory as match — Model Contract compliance)
+        let validation = RobotValidator.validate(root: robot)
+        if !validation.passed {
+            print("[RobotValidator] Preview robot failed validation:")
+            for f in validation.failures { print("  [\(f.severity.rawValue)] \(f.description)") }
+        }
+
+        // Slow turntable rotation
         let rotate = SCNAction.repeatForever(
             SCNAction.rotateBy(x: 0, y: CGFloat.pi * 2, z: 0, duration: 10)
         )
         robot.runAction(rotate)
 
-        robot.enumerateChildNodes { child, _ in
-            if let name = child.name, name.hasPrefix("wheel_") {
+        // Animate wheels using Model Contract hierarchy
+        let moduleNames = ["ModuleFL", "ModuleFR", "ModuleBL", "ModuleBR"]
+        for moduleName in moduleNames {
+            if let module = robot.childNode(withName: moduleName, recursively: false),
+               let steerPivot = module.childNode(withName: "SteerPivot", recursively: false),
+               let wheelRoll = steerPivot.childNode(withName: "WheelRoll", recursively: false) {
                 let spin = SCNAction.repeatForever(
                     SCNAction.rotateBy(x: CGFloat.pi * 2, y: 0, z: 0, duration: 1.0)
                 )
-                child.runAction(spin)
+                wheelRoll.runAction(spin)
             }
+        }
+
+        // Animate intake roller
+        robot.enumerateChildNodes { child, _ in
             if child.name == "intake_roller" {
                 let spin = SCNAction.repeatForever(
                     SCNAction.rotateBy(x: 0, y: 0, z: CGFloat.pi * 2, duration: 0.8)

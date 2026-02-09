@@ -1334,7 +1334,7 @@ enum GameGenerator {
 // MARK: - Robot Factory
 // ============================================================================
 
-enum RobotFactory {
+enum RobotConfigFactory {
 
     private static let redTeamNumbers  = ["9999", "2468", "1357"]
     private static let blueTeamNumbers = ["254", "1678", "118"]

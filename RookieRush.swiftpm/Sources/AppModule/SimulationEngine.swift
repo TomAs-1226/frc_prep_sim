@@ -35,11 +35,13 @@ class RobotAgent {
     var teamScore: Int = 0
     var opponentScore: Int = 0
 
-    // Cached component nodes for animation
+    // Cached component nodes for animation (Model Contract hierarchy)
     weak var sceneNode: SCNNode?
-    var wheelNodes: [SCNNode] = []
-    var mechanismNode: SCNNode?   // elevator_stage or pivot_arm
-    var intakeNode: SCNNode?      // intake_roller
+    var steerPivotNodes: [SCNNode] = []   // SteerPivot nodes for steering
+    var wheelRollNodes: [SCNNode] = []    // WheelRoll nodes for rolling
+    var mechanismNode: SCNNode?           // elevator_stage or pivot_arm
+    var intakeNode: SCNNode?              // intake_roller
+    var smoothedSteerAngle: Float = 0     // Smoothed steering angle
 
     init(config: RobotConfig, game: GeneratedGame) {
         self.config = config
@@ -48,14 +50,29 @@ class RobotAgent {
         self.heading = config.alliance == .red ? Float.pi : 0
     }
 
-    /// Cache references to animatable child nodes.
+    /// Cache references to animatable child nodes using Model Contract hierarchy.
     func cacheComponentNodes() {
         guard let root = sceneNode else { return }
-        wheelNodes = []
+        steerPivotNodes = []
+        wheelRollNodes = []
+        mechanismNode = nil
+        intakeNode = nil
+
+        // Find modules by name (Model Contract: ModuleFL/FR/BL/BR)
+        let moduleNames = ["ModuleFL", "ModuleFR", "ModuleBL", "ModuleBR"]
+        for moduleName in moduleNames {
+            if let module = root.childNode(withName: moduleName, recursively: false),
+               let steerPivot = module.childNode(withName: "SteerPivot", recursively: false),
+               let wheelRoll = steerPivot.childNode(withName: "WheelRoll", recursively: false) {
+                steerPivotNodes.append(steerPivot)
+                wheelRollNodes.append(wheelRoll)
+            }
+        }
+
+        // Cache superstructure components
         root.enumerateChildNodes { child, _ in
             if let name = child.name {
-                if name.hasPrefix("wheel_") { self.wheelNodes.append(child) }
-                else if name == "elevator_stage" { self.mechanismNode = child }
+                if name == "elevator_stage" { self.mechanismNode = child }
                 else if name == "pivot_arm" { self.mechanismNode = child }
                 else if name == "intake_roller" { self.intakeNode = child }
             }
@@ -376,40 +393,54 @@ class RobotAgent {
         node.position = SCNVector3(position.x, 0.0, position.y)
         node.eulerAngles.y = heading
 
-        // Animate wheels proportional to speed
-        let spinRate = speed * 3.0
-        for wheel in wheelNodes {
-            wheel.eulerAngles.x += spinRate * (1.0 / 30.0)
+        let dt: Float = 1.0 / 30.0
+        let wheelR = PartLibrary.wheelRadius
+
+        // Wheel animation: rollSpeed = linearSpeed / wheelRadius
+        let rollSpeed = speed / wheelR
+        let rollSign: Float = 1.0  // positive = forward
+        for wheelRoll in wheelRollNodes {
+            wheelRoll.eulerAngles.x += rollSpeed * rollSign * dt
+        }
+
+        // Steer angle = heading of velocity vector (smoothed)
+        // For swerve: steer pivots point in movement direction
+        // For tank/mecanum: steer pivots stay at 0
+        if !steerPivotNodes.isEmpty {
+            let targetSteer: Float = 0  // relative to body frame, always 0
+            // Smooth steer transitions
+            smoothedSteerAngle += (targetSteer - smoothedSteerAngle) * 0.15
+            for pivot in steerPivotNodes {
+                pivot.eulerAngles.y = smoothedSteerAngle
+            }
         }
 
         // Animate intake roller when picking up
         if state == .pickingUp, let intake = intakeNode {
-            intake.eulerAngles.x += Float.pi * 4.0 * (1.0 / 30.0)
+            intake.eulerAngles.x += Float.pi * 4.0 * dt
         }
 
         // Animate mechanism during scoring
         if state == .scoring, let mech = mechanismNode {
             if mech.name == "elevator_stage" {
-                // Extend elevator based on target zone height
                 let targetY: Float
                 if let zone = currentTargetZone {
                     targetY = zone.height.sceneHeight * 0.25
                 } else {
                     targetY = 0.14
                 }
-                let baseY: Float = 0.08
+                let baseY: Float = PartLibrary.chassisHeight
                 mech.position.y += (targetY + baseY - mech.position.y) * 0.08
             } else if mech.name == "pivot_arm" {
                 let targetAngle: Float = -0.4
-                mech.eulerAngles.x += (targetAngle - mech.eulerAngles.x) * 0.06
+                mech.eulerAngles.z += (targetAngle - mech.eulerAngles.z) * 0.06
             }
         } else if let mech = mechanismNode {
-            // Return to rest position when not scoring
             if mech.name == "elevator_stage" {
-                let baseY: Float = 0.08 + 0.08
-                mech.position.y += (baseY - mech.position.y) * 0.05
+                let restY: Float = PartLibrary.chassisHeight + PartLibrary.chassisHeight
+                mech.position.y += (restY - mech.position.y) * 0.05
             } else if mech.name == "pivot_arm" {
-                mech.eulerAngles.x += (0.35 - mech.eulerAngles.x) * 0.05
+                mech.eulerAngles.z += (0.30 - mech.eulerAngles.z) * 0.05
             }
         }
     }
@@ -1390,6 +1421,28 @@ final class MatchEngine: ObservableObject {
         stop()
         period = .finished
         isFinished = true
+
+        // End-of-match celebration: confetti burst for winning alliance
+        if let scene = scene {
+            let winColor: Alliance = redScore >= blueScore ? .red : .blue
+            for _ in 0..<3 {
+                let pos = SCNVector3(
+                    Float.random(in: -1.5...1.5),
+                    0.4,
+                    Float.random(in: -1.0...1.0)
+                )
+                FieldBuilder.spawnScoreParticles(at: pos, alliance: winColor, scene: scene)
+            }
+
+            // Winning robots do a victory spin
+            for agent in agents where agent.config.alliance == winColor {
+                if let node = agent.sceneNode {
+                    let spin = SCNAction.rotateBy(x: 0, y: CGFloat.pi * 4, z: 0, duration: 2.0)
+                    spin.timingMode = .easeInEaseOut
+                    node.runAction(spin)
+                }
+            }
+        }
     }
 
     // MARK: - Result
