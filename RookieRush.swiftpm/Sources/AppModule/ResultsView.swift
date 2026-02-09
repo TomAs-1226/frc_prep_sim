@@ -13,6 +13,8 @@ struct ResultsView: View {
     @State private var animateScore = false
     @State private var rewards: ProfileManager.MatchRewards?
     @State private var showLevelUp = false
+    @State private var newAchievementIndex = 0
+    @State private var showAchievement = false
     @State private var showXP = false
 
     var body: some View {
@@ -112,6 +114,11 @@ struct ResultsView: View {
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
                     withAnimation { showLevelUp = false }
+                }
+            }
+            if !r.newAchievements.isEmpty {
+                withAnimation(.spring(response: 0.5).delay(1.5)) {
+                    showAchievement = true
                 }
             }
             Task { await coach.generateFeedback(for: result) }
