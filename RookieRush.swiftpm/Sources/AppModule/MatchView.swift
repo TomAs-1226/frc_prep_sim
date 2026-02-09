@@ -10,6 +10,8 @@ struct MatchView: View {
     let playerBuild: RobotBuild
     let autoPlan: AutoPlan
     let game: GeneratedGame
+    let tournamentLabel: String?
+    let seriesRecord: String?
     let onFinish: (MatchResult) -> Void
 
     @StateObject private var engine: MatchEngine
@@ -18,12 +20,16 @@ struct MatchView: View {
     @State private var hasStarted = false
 
     init(strategy: AllianceStrategy, playerRole: RobotRole, playerBuild: RobotBuild,
-         autoPlan: AutoPlan, game: GeneratedGame, onFinish: @escaping (MatchResult) -> Void) {
+         autoPlan: AutoPlan, game: GeneratedGame,
+         tournamentLabel: String? = nil, seriesRecord: String? = nil,
+         onFinish: @escaping (MatchResult) -> Void) {
         self.strategy = strategy
         self.playerRole = playerRole
         self.playerBuild = playerBuild
         self.autoPlan = autoPlan
         self.game = game
+        self.tournamentLabel = tournamentLabel
+        self.seriesRecord = seriesRecord
         self.onFinish = onFinish
 
         let configs = RobotFactory.buildRobots(
@@ -106,11 +112,28 @@ struct MatchView: View {
                     .padding(.bottom, 8)
                     .animation(.easeInOut(duration: 0.3), value: engine.isSlowMo)
 
-                // Footer: game name
-                Text(game.name)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(0.25))
-                    .padding(.bottom, 4)
+                // Footer: game name + tournament info
+                VStack(spacing: 2) {
+                    if let label = tournamentLabel {
+                        HStack(spacing: 6) {
+                            Image(systemName: "trophy.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.yellow.opacity(0.7))
+                            Text(label)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.yellow.opacity(0.7))
+                            if let record = seriesRecord {
+                                Text("(\(record))")
+                                    .font(.system(size: 10, weight: .black, design: .monospaced))
+                                    .foregroundStyle(.yellow.opacity(0.5))
+                            }
+                        }
+                    }
+                    Text(game.name)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.25))
+                }
+                .padding(.bottom, 4)
 
                 // Bottom controls
                 controlBar

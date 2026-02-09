@@ -6,6 +6,7 @@ import SwiftUI
 struct ResultsView: View {
     let result: MatchResult
     @ObservedObject var profileManager: ProfileManager
+    var tournamentState: TournamentState?
     let onTryAgain: () -> Void
 
     @StateObject private var coach = AICoach()
@@ -16,6 +17,8 @@ struct ResultsView: View {
     @State private var newAchievementIndex = 0
     @State private var showAchievement = false
     @State private var showXP = false
+
+    private var isTournament: Bool { tournamentState != nil }
 
     var body: some View {
         ZStack {
@@ -71,22 +74,39 @@ struct ResultsView: View {
                     coachingCard
                         .padding(.horizontal, 20)
 
+                    buildRecommendationSection
+                        .padding(.horizontal, 20)
+
+                    // Tournament status banner
+                    if let ts = tournamentState {
+                        tournamentStatusBanner(ts)
+                            .padding(.horizontal, 20)
+                    }
+
                     Button(action: onTryAgain) {
                         HStack(spacing: 8) {
-                            Image(systemName: "arrow.counterclockwise")
-                            Text("Try New Game")
+                            Image(systemName: isTournament ?
+                                  (tournamentState?.isComplete == true ? "trophy.fill" : "arrow.right") :
+                                    "arrow.counterclockwise")
+                            Text(buttonLabel)
                                 .font(.headline)
                         }
-                        .foregroundStyle(.black)
+                        .foregroundStyle(isTournament && tournamentState?.isComplete == true ? .yellow : .black)
                         .frame(maxWidth: 280)
                         .padding(.vertical, 14)
                         .background(
                             RoundedRectangle(cornerRadius: 14)
-                                .fill(Color.orange)
+                                .fill(isTournament && tournamentState?.isComplete == true ?
+                                      Color.yellow.opacity(0.2) : Color.orange)
+                                .overlay(
+                                    isTournament && tournamentState?.isComplete == true ?
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .strokeBorder(Color.yellow.opacity(0.4), lineWidth: 1) : nil
+                                )
                         )
                         .modifier(GlassModifier(shape: RoundedRectangle(cornerRadius: 14)))
                     }
-                    .accessibilityLabel("Try again with a new procedurally generated game")
+                    .accessibilityLabel(buttonLabel)
 
                     Text(result.game.name)
                         .font(.system(size: 9))
@@ -573,14 +593,40 @@ struct ResultsView: View {
             }
 
             // Power fit for archetype
-            if result.game.archetype == .power {
+            if result.game.archetype == .power || result.game.archetype == .defenseArena {
                 let strongPush = result.playerBuild.drivetrain.pushPower > 0.7
                 analysisRow(
                     icon: "bolt.shield.fill",
                     label: "Power Rating",
-                    detail: "Power Play rewards strong pushers (\(result.playerBuild.drivetrain.shortLabel))",
+                    detail: "\(result.game.archetype.rawValue) rewards strong pushers (\(result.playerBuild.drivetrain.shortLabel))",
                     isGood: strongPush,
                     color: .red
+                )
+            }
+
+            // Endgame Focus fit
+            if result.game.archetype == .endgameFocus {
+                let endgameGood = result.game.endgameChallenge.requiresTank ? result.playerBuild.drivetrain.canDeepClimb :
+                    (result.playerBuild.drivetrain.canStrafe || true)
+                analysisRow(
+                    icon: "flag.checkered",
+                    label: "Endgame Prep",
+                    detail: "Endgame Focus: \(result.game.endgameChallenge.points)pts available from endgame alone",
+                    isGood: endgameGood,
+                    color: .indigo
+                )
+            }
+
+            // Hybrid fit
+            if result.game.archetype == .hybrid {
+                let canShoot = result.playerBuild.manipulator.canShoot
+                let canReachMid = result.playerBuild.manipulator.maxReach >= .mid
+                analysisRow(
+                    icon: "arrow.triangle.branch",
+                    label: "Versatility",
+                    detail: "Hybrid Challenge rewards \(canShoot ? "shooting + " : "")reaching \(result.playerBuild.manipulator.maxReach.displayName)",
+                    isGood: canShoot || canReachMid,
+                    color: .mint
                 )
             }
         }
@@ -1045,5 +1091,159 @@ struct ResultsView: View {
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Coach feedback: \(coach.coachingText)")
+    }
+
+    // MARK: - Build Recommendation
+
+    @ViewBuilder
+    private var buildRecommendationSection: some View {
+        let recommendation = BuildRecommendation.forGame(result.game)
+        let playerScore = result.buildMatchScore
+        let improvement = recommendation.expectedScore - playerScore
+
+        if improvement > 5 {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "lightbulb.fill")
+                        .foregroundStyle(.yellow)
+                    Text("BUILD RECOMMENDATION")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.yellow)
+                        .tracking(0.5)
+                    Spacer()
+                    Text("+\(improvement) pts possible")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.green.opacity(0.8))
+                }
+
+                Text("For \(result.game.name), try:")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+
+                HStack(spacing: 8) {
+                    recoPill(icon: recommendation.drivetrain.icon, label: recommendation.drivetrain.shortLabel,
+                             color: recommendation.drivetrain.color)
+                    recoPill(icon: recommendation.frame.icon, label: recommendation.frame.shortLabel,
+                             color: recommendation.frame.color)
+                    recoPill(icon: recommendation.manipulator.icon, label: recommendation.manipulator.shortLabel,
+                             color: recommendation.manipulator.color)
+                    recoPill(icon: recommendation.intake.icon, label: recommendation.intake.shortLabel,
+                             color: recommendation.intake.color)
+                }
+
+                Text(recommendation.reasoning)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.yellow.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(Color.yellow.opacity(0.15), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func recoPill(icon: String, label: String, color: Color) -> some View {
+        VStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.white.opacity(0.7))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8).fill(color.opacity(0.08))
+        )
+    }
+
+    // MARK: - Tournament Status
+
+    @ViewBuilder
+    private func tournamentStatusBanner(_ ts: TournamentState) -> some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "trophy.fill")
+                    .foregroundStyle(.yellow)
+                Text(ts.activeConfig.name)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.white)
+                Spacer()
+                Text("Series: \(ts.seriesRecord)")
+                    .font(.system(size: 12, weight: .black, design: .monospaced))
+                    .foregroundStyle(.yellow)
+            }
+
+            // Match dots (showing which matches won/lost)
+            HStack(spacing: 8) {
+                ForEach(0..<ts.activeConfig.roundCount, id: \.self) { i in
+                    if i < ts.matchResults.count {
+                        let won = ts.matchResults[i].playerWon
+                        Circle()
+                            .fill(won ? Color.green : Color.red)
+                            .frame(width: 14, height: 14)
+                            .overlay(
+                                Image(systemName: won ? "checkmark" : "xmark")
+                                    .font(.system(size: 7, weight: .bold))
+                                    .foregroundStyle(.white)
+                            )
+                    } else if i == ts.currentRound && !ts.isComplete {
+                        Circle()
+                            .strokeBorder(Color.yellow, lineWidth: 2)
+                            .frame(width: 14, height: 14)
+                            .overlay(
+                                Text("\(i + 1)")
+                                    .font(.system(size: 7, weight: .bold))
+                                    .foregroundStyle(.yellow)
+                            )
+                    } else {
+                        Circle()
+                            .fill(Color.white.opacity(0.1))
+                            .frame(width: 14, height: 14)
+                    }
+                }
+                Spacer()
+
+                if ts.isComplete {
+                    Text(ts.playerWonTournament ? "WON" : "ELIMINATED")
+                        .font(.system(size: 10, weight: .black))
+                        .foregroundStyle(ts.playerWonTournament ? .green : .red)
+                } else {
+                    Text("Next: \(ts.activeConfig.roundCount - ts.currentRound) remaining")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.yellow.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(Color.yellow.opacity(0.15), lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - Button Label
+
+    private var buttonLabel: String {
+        if let ts = tournamentState {
+            if ts.isComplete {
+                return ts.playerWonTournament ? "Tournament Summary" : "Tournament Summary"
+            } else {
+                return "Next Match (\(ts.roundLabel))"
+            }
+        }
+        return "Try New Game"
     }
 }

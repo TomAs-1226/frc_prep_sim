@@ -259,39 +259,51 @@ enum FieldTheme: String, CaseIterable {
 // MARK: - Game Archetype
 
 enum GameArchetype: String, CaseIterable {
-    case vertical  = "Altitude Challenge"
-    case speed     = "Speed Rush"
-    case precision = "Precision Strike"
-    case power     = "Power Play"
-    case classic   = "All-Rounder"
+    case vertical      = "Altitude Challenge"
+    case speed         = "Speed Rush"
+    case precision     = "Precision Strike"
+    case power         = "Power Play"
+    case classic       = "All-Rounder"
+    case endgameFocus  = "Endgame Focus"
+    case hybrid        = "Hybrid Challenge"
+    case defenseArena  = "Defense Arena"
 
     var description: String {
         switch self {
-        case .vertical:  return "Tall scoring targets reward robots that can reach high. Climbing endgame favors sturdy builds."
-        case .speed:     return "Many low targets reward fast cycling. Light, agile builds dominate."
-        case .precision: return "Mid-height targets require accurate placement. Reliable builds shine."
-        case .power:     return "Obstacles and tight spaces reward strong pushers and durable frames."
-        case .classic:   return "A balanced mix of heights and challenges. Versatile builds do well."
+        case .vertical:     return "Tall scoring targets reward robots that can reach high. Climbing endgame favors sturdy builds."
+        case .speed:        return "Many low targets reward fast cycling. Light, agile builds dominate."
+        case .precision:    return "Mid-height targets require accurate placement. Reliable builds shine."
+        case .power:        return "Obstacles and tight spaces reward strong pushers and durable frames."
+        case .classic:      return "A balanced mix of heights and challenges. Versatile builds do well."
+        case .endgameFocus: return "Endgame is worth massive points. Plan your robot around the final challenge."
+        case .hybrid:       return "Mix of shooting and placing. Versatile mechanisms that can do both excel."
+        case .defenseArena: return "Low-scoring slugfest with many obstacles. Defense wins championships here."
         }
     }
 
     var icon: String {
         switch self {
-        case .vertical:  return "arrow.up.circle.fill"
-        case .speed:     return "hare.fill"
-        case .precision: return "scope"
-        case .power:     return "bolt.shield.fill"
-        case .classic:   return "star.fill"
+        case .vertical:     return "arrow.up.circle.fill"
+        case .speed:        return "hare.fill"
+        case .precision:    return "scope"
+        case .power:        return "bolt.shield.fill"
+        case .classic:      return "star.fill"
+        case .endgameFocus: return "flag.checkered"
+        case .hybrid:       return "arrow.triangle.branch"
+        case .defenseArena: return "shield.lefthalf.filled"
         }
     }
 
     var color: Color {
         switch self {
-        case .vertical:  return .purple
-        case .speed:     return .cyan
-        case .precision: return .yellow
-        case .power:     return .red
-        case .classic:   return .orange
+        case .vertical:     return .purple
+        case .speed:        return .cyan
+        case .precision:    return .yellow
+        case .power:        return .red
+        case .classic:      return .orange
+        case .endgameFocus: return .indigo
+        case .hybrid:       return .mint
+        case .defenseArena: return .pink
         }
     }
 }
@@ -347,8 +359,30 @@ struct GeneratedGame: Identifiable {
             else if totalSpeed > 2.0 { score += 6 }
         }
 
-        if archetype == .power {
+        if archetype == .power || archetype == .defenseArena {
             if build.drivetrain.pushPower > 0.7 { score += 10 }
+            if build.frame == .steel { score += 5 }
+        }
+
+        if archetype == .endgameFocus {
+            switch endgameChallenge {
+            case .climb(let d, _):
+                if d == .high && build.drivetrain.canDeepClimb { score += 10 }
+                else if d != .high { score += 5 }
+            case .balance:
+                if build.drivetrain.canStrafe { score += 10 }
+            case .park:
+                score += 3
+            }
+        }
+
+        if archetype == .hybrid {
+            if build.manipulator.canShoot { score += 8 }
+            if build.manipulator.maxReach >= .mid { score += 6 }
+        }
+
+        if archetype == .defenseArena {
+            if build.drivetrain.pushPower > 0.5 { score += 8 }
             if build.frame == .steel { score += 5 }
         }
 
@@ -1086,14 +1120,21 @@ enum GameGenerator {
     // MARK: - Name Generation
 
     private static func generateName(archetype: GameArchetype, rng: inout SeededRNG) -> String {
-        let adjectives = ["Stellar", "Rapid", "Iron", "Quantum", "Voltage", "Titan", "Nova", "Apex", "Turbo", "Hyper"]
+        let adjectives = [
+            "Stellar", "Rapid", "Iron", "Quantum", "Voltage", "Titan", "Nova", "Apex", "Turbo", "Hyper",
+            "Crimson", "Cobalt", "Neon", "Omega", "Phoenix", "Storm", "Fusion", "Cosmic", "Thunder", "Vortex",
+            "Blazing", "Frozen", "Shadow", "Lunar", "Solar", "Atomic", "Inferno", "Crystal", "Phantom", "Radiant"
+        ]
         let nouns: [String]
         switch archetype {
-        case .vertical:  nouns = ["Heights", "Ascent", "Summit", "Pinnacle", "Skyreach"]
-        case .speed:     nouns = ["Sprint", "Dash", "Blitz", "Rush", "Velocity"]
-        case .precision: nouns = ["Strike", "Focus", "Aim", "Precision", "Marksman"]
-        case .power:     nouns = ["Forge", "Clash", "Siege", "Fortress", "Bastion"]
-        case .classic:   nouns = ["Challenge", "Arena", "Circuit", "Showdown", "Gauntlet"]
+        case .vertical:     nouns = ["Heights", "Ascent", "Summit", "Pinnacle", "Skyreach", "Zenith", "Tower", "Spire"]
+        case .speed:        nouns = ["Sprint", "Dash", "Blitz", "Rush", "Velocity", "Surge", "Flash", "Tempo"]
+        case .precision:    nouns = ["Strike", "Focus", "Aim", "Precision", "Marksman", "Scope", "Bullseye", "Sniper"]
+        case .power:        nouns = ["Forge", "Clash", "Siege", "Fortress", "Bastion", "Rampart", "Anvil", "Juggernaut"]
+        case .classic:      nouns = ["Challenge", "Arena", "Circuit", "Showdown", "Gauntlet", "Championship", "Rally", "Invitational"]
+        case .endgameFocus: nouns = ["Finale", "Climax", "Countdown", "Crescendo", "Overtime", "Last Stand", "Endzone", "Clutch"]
+        case .hybrid:       nouns = ["Spectrum", "Fusion", "Nexus", "Matrix", "Synergy", "Crossover", "Catalyst", "Mosaic"]
+        case .defenseArena: nouns = ["Warzone", "Stronghold", "Barricade", "Lockdown", "Bunker", "Citadel", "Bulwark", "Blockade"]
         }
 
         let adj = adjectives[rng.nextInt(0..<adjectives.count)]
@@ -1134,6 +1175,12 @@ enum GameGenerator {
             heights = [.ground, .ground, .low, .mid]
         case .classic:
             heights = [.ground, .low, .mid, .high]
+        case .endgameFocus:
+            heights = [.ground, .low, .low, .mid]
+        case .hybrid:
+            heights = [.ground, .low, .mid, .high]
+        case .defenseArena:
+            heights = [.ground, .ground, .low, .low]
         }
 
         // Z positions for scoring zones (spread across field width)
@@ -1195,6 +1242,22 @@ enum GameGenerator {
                 .balance(points: 8),
             ]
             return options[rng.nextInt(0..<options.count)]
+        case .endgameFocus:
+            // Endgame is worth a LOT here
+            let options: [EndgameChallenge] = [
+                .climb(difficulty: .high, points: 20),
+                .climb(difficulty: .mid, points: 15),
+                .balance(points: 18),
+            ]
+            return options[rng.nextInt(0..<options.count)]
+        case .hybrid:
+            let options: [EndgameChallenge] = [
+                .climb(difficulty: .mid, points: 10),
+                .balance(points: 10),
+            ]
+            return options[rng.nextInt(0..<options.count)]
+        case .defenseArena:
+            return .climb(difficulty: .low, points: 4)
         }
     }
 
@@ -1210,8 +1273,8 @@ enum GameGenerator {
             size: SIMD2(0.56, 4.0)
         ))
 
-        // Power Play gets extra barriers
-        if archetype == .power {
+        // Power Play and Defense Arena get extra barriers
+        if archetype == .power || archetype == .defenseArena {
             obstacles.append(FieldObstacle(
                 id: 1, kind: .barrier,
                 position: SIMD2(1.5, 0),
@@ -1224,6 +1287,21 @@ enum GameGenerator {
             ))
         }
 
+        // Defense Arena gets even more obstacles
+        if archetype == .defenseArena {
+            // Additional barriers near scoring zones
+            obstacles.append(FieldObstacle(
+                id: obstacles.count, kind: .barrier,
+                position: SIMD2(2.2, 0.6),
+                size: SIMD2(0.10, 0.8)
+            ))
+            obstacles.append(FieldObstacle(
+                id: obstacles.count + 1, kind: .barrier,
+                position: SIMD2(-2.2, -0.6),
+                size: SIMD2(0.10, 0.8)
+            ))
+        }
+
         // Random chance of ramp
         if rng.nextBool(probability: 0.3) && archetype != .speed {
             let side: Float = rng.nextBool() ? 1.0 : -1.0
@@ -1231,6 +1309,20 @@ enum GameGenerator {
                 id: obstacles.count, kind: .ramp,
                 position: SIMD2(side * 1.0, rng.nextFloat() * 1.5 - 0.75),
                 size: SIMD2(0.5, 0.8)
+            ))
+        }
+
+        // Hybrid gets a ramp on each side
+        if archetype == .hybrid {
+            obstacles.append(FieldObstacle(
+                id: obstacles.count, kind: .ramp,
+                position: SIMD2(1.2, 0.5),
+                size: SIMD2(0.5, 0.7)
+            ))
+            obstacles.append(FieldObstacle(
+                id: obstacles.count + 1, kind: .ramp,
+                position: SIMD2(-1.2, -0.5),
+                size: SIMD2(0.5, 0.7)
             ))
         }
 
@@ -1442,73 +1534,94 @@ struct RoundRecord: Codable, Identifiable, Equatable {
 // MARK: - Achievement
 
 enum Achievement: String, CaseIterable, Identifiable, Codable {
-    case firstMatch     = "Rookie"
-    case firstWin       = "Victor"
-    case analyzer       = "Analyzer"
-    case perfectBuild   = "Perfect Engineer"
-    case strategist     = "Strategist"
-    case speedDemon     = "Speed Demon"
-    case skyReacher     = "Sky Reacher"
-    case winStreak5     = "On Fire"
-    case veteran        = "Veteran"
-    case masterBuilder  = "Master Builder"
-    case fullArsenal    = "Full Arsenal"
-    case comebacker     = "Comeback Kid"
+    case firstMatch       = "Rookie"
+    case firstWin         = "Victor"
+    case analyzer         = "Analyzer"
+    case perfectBuild     = "Perfect Engineer"
+    case strategist       = "Strategist"
+    case speedDemon       = "Speed Demon"
+    case skyReacher       = "Sky Reacher"
+    case winStreak5       = "On Fire"
+    case veteran          = "Veteran"
+    case masterBuilder    = "Master Builder"
+    case fullArsenal      = "Full Arsenal"
+    case comebacker       = "Comeback Kid"
+    case tournamentWinner = "Champion"
+    case tournamentSweep  = "Clean Sweep"
+    case endgameClutch    = "Clutch Player"
+    case defenseAce       = "Iron Wall"
 
     var id: String { rawValue }
 
     var icon: String {
         switch self {
-        case .firstMatch:    return "star.fill"
-        case .firstWin:      return "trophy.fill"
-        case .analyzer:      return "magnifyingglass"
-        case .perfectBuild:  return "wrench.and.screwdriver.fill"
-        case .strategist:    return "megaphone.fill"
-        case .speedDemon:    return "hare.fill"
-        case .skyReacher:    return "arrow.up.circle.fill"
-        case .winStreak5:    return "flame.fill"
-        case .veteran:       return "shield.fill"
-        case .masterBuilder: return "hammer.fill"
-        case .fullArsenal:   return "shippingbox.fill"
-        case .comebacker:    return "arrow.turn.up.right"
+        case .firstMatch:       return "star.fill"
+        case .firstWin:         return "trophy.fill"
+        case .analyzer:         return "magnifyingglass"
+        case .perfectBuild:     return "wrench.and.screwdriver.fill"
+        case .strategist:       return "megaphone.fill"
+        case .speedDemon:       return "hare.fill"
+        case .skyReacher:       return "arrow.up.circle.fill"
+        case .winStreak5:       return "flame.fill"
+        case .veteran:          return "shield.fill"
+        case .masterBuilder:    return "hammer.fill"
+        case .fullArsenal:      return "shippingbox.fill"
+        case .comebacker:       return "arrow.turn.up.right"
+        case .tournamentWinner: return "crown.fill"
+        case .tournamentSweep:  return "medal.fill"
+        case .endgameClutch:    return "flag.checkered"
+        case .defenseAce:       return "shield.lefthalf.filled"
         }
     }
 
     var description: String {
         switch self {
-        case .firstMatch:    return "Complete your first match"
-        case .firstWin:      return "Win a match"
-        case .analyzer:      return "Score 75+ on build match"
-        case .perfectBuild:  return "Score 90+ on build match"
-        case .strategist:    return "Use 3+ callouts in a match"
-        case .speedDemon:    return "Win a Speed Rush game"
-        case .skyReacher:    return "Win a Vertical Challenge game"
-        case .winStreak5:    return "Win 5 matches in a row"
-        case .veteran:       return "Play 10 rounds"
-        case .masterBuilder: return "Reach level 10"
-        case .fullArsenal:   return "Unlock all robot parts"
-        case .comebacker:    return "Win after trailing by 10+"
+        case .firstMatch:       return "Complete your first match"
+        case .firstWin:         return "Win a match"
+        case .analyzer:         return "Score 75+ on build match"
+        case .perfectBuild:     return "Score 90+ on build match"
+        case .strategist:       return "Use 3+ callouts in a match"
+        case .speedDemon:       return "Win a Speed Rush game"
+        case .skyReacher:       return "Win a Vertical Challenge game"
+        case .winStreak5:       return "Win 5 matches in a row"
+        case .veteran:          return "Play 10 rounds"
+        case .masterBuilder:    return "Reach level 10"
+        case .fullArsenal:      return "Unlock all robot parts"
+        case .comebacker:       return "Win after trailing by 10+"
+        case .tournamentWinner: return "Win a tournament series"
+        case .tournamentSweep:  return "Win all matches in a tournament"
+        case .endgameClutch:    return "Win an Endgame Focus game"
+        case .defenseAce:       return "Win a Defense Arena game"
         }
     }
 
     var color: Color {
         switch self {
-        case .firstMatch:    return .gray
-        case .firstWin:      return .yellow
-        case .analyzer:      return .cyan
-        case .perfectBuild:  return .purple
-        case .strategist:    return .orange
-        case .speedDemon:    return .mint
-        case .skyReacher:    return .indigo
-        case .winStreak5:    return .red
-        case .veteran:       return .green
-        case .masterBuilder: return .blue
-        case .fullArsenal:   return .pink
-        case .comebacker:    return .teal
+        case .firstMatch:       return .gray
+        case .firstWin:         return .yellow
+        case .analyzer:         return .cyan
+        case .perfectBuild:     return .purple
+        case .strategist:       return .orange
+        case .speedDemon:       return .mint
+        case .skyReacher:       return .indigo
+        case .winStreak5:       return .red
+        case .veteran:          return .green
+        case .masterBuilder:    return .blue
+        case .fullArsenal:      return .pink
+        case .comebacker:       return .teal
+        case .tournamentWinner: return Color(red: 1.0, green: 0.84, blue: 0.0)
+        case .tournamentSweep:  return Color(red: 0.85, green: 0.65, blue: 0.13)
+        case .endgameClutch:    return .indigo
+        case .defenseAce:       return .pink
         }
     }
 
-    var xpReward: Int { 50 }
+    var xpReward: Int {
+        switch self {
+        case .tournamentWinner, .tournamentSweep: return 100
+        default: return 50
+        }
+    }
 }
 
 // MARK: - XP Rewards
@@ -1630,6 +1743,8 @@ struct PlayerProfile: Codable, Equatable {
             (.strategist, result.calloutsUsed.count >= 3),
             (.speedDemon, result.playerWon && result.game.archetype == .speed),
             (.skyReacher, result.playerWon && result.game.archetype == .vertical),
+            (.endgameClutch, result.playerWon && result.game.archetype == .endgameFocus),
+            (.defenseAce, result.playerWon && result.game.archetype == .defenseArena),
             (.winStreak5, winStreak >= 5),
             (.veteran, totalRounds >= 10),
             (.masterBuilder, level >= 10),
@@ -1712,5 +1827,235 @@ final class ProfileManager: ObservableObject {
     func resetProfile() {
         profile = PlayerProfile()
         save()
+    }
+}
+
+// ============================================================================
+// MARK: - Tournament Mode
+// ============================================================================
+
+/// Tournament configuration: defines a series of matches
+struct TournamentConfig: Equatable {
+    let roundCount: Int          // 3, 5, or 7
+    let difficulty: TournamentDifficulty
+    let name: String
+    let baseSeed: UInt64
+
+    static func quickPlay(seed: UInt64) -> TournamentConfig {
+        TournamentConfig(roundCount: 3, difficulty: .normal, name: "Quick Cup", baseSeed: seed)
+    }
+
+    static func standard(seed: UInt64) -> TournamentConfig {
+        TournamentConfig(roundCount: 5, difficulty: .normal, name: "Regional", baseSeed: seed)
+    }
+
+    static func championship(seed: UInt64) -> TournamentConfig {
+        TournamentConfig(roundCount: 7, difficulty: .hard, name: "Championship", baseSeed: seed)
+    }
+
+    /// Generate a unique game for each round in the tournament
+    func gameForRound(_ round: Int) -> GeneratedGame {
+        GameGenerator.generate(seed: baseSeed &+ UInt64(round * 7919))
+    }
+}
+
+enum TournamentDifficulty: String, Equatable {
+    case easy   = "Rookie"
+    case normal = "Varsity"
+    case hard   = "Elite"
+
+    var opponentSkillBoost: Float {
+        switch self { case .easy: return -0.15; case .normal: return 0; case .hard: return 0.15 }
+    }
+
+    var xpMultiplier: Double {
+        switch self { case .easy: return 0.8; case .normal: return 1.0; case .hard: return 1.5 }
+    }
+}
+
+/// Tracks state of an in-progress tournament
+@MainActor
+final class TournamentState: ObservableObject {
+    let config: TournamentConfig
+
+    @Published var currentRound: Int = 0
+    @Published var playerWins: Int = 0
+    @Published var opponentWins: Int = 0
+    @Published var matchResults: [MatchResult] = []
+    @Published var isComplete: Bool = false
+    @Published var currentGame: GeneratedGame?
+
+    init(config: TournamentConfig) {
+        self.config = config
+        self.currentGame = config.gameForRound(0)
+    }
+
+    var winsNeeded: Int { (activeConfig.roundCount / 2) + 1 }
+
+    var playerWonTournament: Bool { playerWins >= winsNeeded }
+    var playerLostTournament: Bool { opponentWins >= winsNeeded }
+    var isSweep: Bool { playerWonTournament && opponentWins == 0 }
+
+    var seriesRecord: String { "\(playerWins)-\(opponentWins)" }
+
+    var roundLabel: String {
+        "Match \(currentRound + 1) of \(activeConfig.roundCount)"
+    }
+
+    func recordResult(_ result: MatchResult) {
+        matchResults.append(result)
+        if result.playerWon {
+            playerWins += 1
+        } else {
+            opponentWins += 1
+        }
+        currentRound += 1
+
+        if playerWins >= winsNeeded || opponentWins >= winsNeeded || currentRound >= activeConfig.roundCount {
+            isComplete = true
+        } else {
+            currentGame = activeConfig.gameForRound(currentRound)
+        }
+    }
+
+    var totalPlayerScore: Int { matchResults.reduce(0) { $0 + $1.redScore } }
+    var totalOpponentScore: Int { matchResults.reduce(0) { $0 + $1.blueScore } }
+    var averageBuildScore: Int {
+        guard !matchResults.isEmpty else { return 0 }
+        return matchResults.reduce(0) { $0 + $1.buildMatchScore } / matchResults.count
+    }
+
+    /// Reset tournament for a new series
+    func resetWith(config newConfig: TournamentConfig) {
+        // We re-initialize by copying config values
+        // Since config is let, we use a new approach: reset all mutable state
+        currentRound = 0
+        playerWins = 0
+        opponentWins = 0
+        matchResults = []
+        isComplete = false
+        currentGame = newConfig.gameForRound(0)
+        // Store new config reference via a workaround
+        _storedConfig = newConfig
+    }
+
+    private var _storedConfig: TournamentConfig?
+
+    /// Access the current config (supports reset)
+    var activeConfig: TournamentConfig {
+        _storedConfig ?? config
+    }
+}
+
+// ============================================================================
+// MARK: - Part Tuning
+// ============================================================================
+
+/// Fine-tuning adjustments applied on top of the base robot build.
+/// Each slider goes from -1.0 to +1.0 (0 = default).
+struct PartTuning: Equatable {
+    /// Speed vs Torque trade-off: positive = faster but weaker push
+    var speedTorque: Float = 0.0
+
+    /// Aggression vs Caution: positive = more aggressive scoring attempts
+    var aggression: Float = 0.0
+
+    /// Weight distribution: positive = front-heavy (better intake), negative = rear-heavy (better stability)
+    var weightBalance: Float = 0.0
+
+    /// Apply tuning modifiers to base robot stats
+    func applyTo(_ stats: RobotStats) -> RobotStats {
+        let speedMod = speedTorque * 0.3
+        let pushMod = -speedTorque * 0.2
+        let reliabilityMod = -abs(aggression) * 0.03
+        let scoringMod = aggression * 0.15
+
+        return RobotStats(
+            maxSpeed: max(1.0, stats.maxSpeed + speedMod),
+            acceleration: stats.acceleration,
+            turnRate: stats.turnRate,
+            scoringTime: max(0.3, stats.scoringTime - scoringMod),
+            pickupTime: stats.pickupTime,
+            reliability: min(0.98, max(0.50, stats.reliability + Double(reliabilityMod))),
+            maxReachHeight: stats.maxReachHeight,
+            pushPower: max(0.1, stats.pushPower + pushMod),
+            canDeepClimb: stats.canDeepClimb,
+            canStrafe: stats.canStrafe,
+            canShoot: stats.canShoot,
+            totalWeight: stats.totalWeight
+        )
+    }
+
+    var isDefault: Bool {
+        speedTorque == 0 && aggression == 0 && weightBalance == 0
+    }
+}
+
+// ============================================================================
+// MARK: - Build Recommendation
+// ============================================================================
+
+/// AI coach build recommendation based on the generated game
+struct BuildRecommendation {
+    let drivetrain: DrivetrainChoice
+    let frame: FrameChoice
+    let manipulator: ManipulatorChoice
+    let intake: IntakeChoice
+    let reasoning: String
+    let expectedScore: Int
+
+    /// Generate a recommendation for a given game
+    static func forGame(_ game: GeneratedGame) -> BuildRecommendation {
+        var bestBuild = RobotBuild()
+        var bestScore = 0
+        var bestReason = ""
+
+        // Evaluate all realistic combinations
+        for dt in DrivetrainChoice.allCases {
+            for fr in FrameChoice.allCases {
+                for mp in ManipulatorChoice.allCases {
+                    for ink in IntakeChoice.allCases {
+                        let build = RobotBuild(drivetrain: dt, frame: fr, manipulator: mp, intake: ink)
+                        let score = game.buildMatchScore(build: build)
+                        if score > bestScore {
+                            bestScore = score
+                            bestBuild = build
+                        }
+                    }
+                }
+            }
+        }
+
+        // Generate reasoning
+        var reasons: [String] = []
+        switch game.archetype {
+        case .vertical, .precision:
+            reasons.append("\(bestBuild.manipulator.shortLabel) reaches \(bestBuild.manipulator.maxReach.displayName) targets")
+        case .speed:
+            reasons.append("\(bestBuild.drivetrain.shortLabel) provides speed for fast cycling")
+        case .power, .defenseArena:
+            reasons.append("\(bestBuild.drivetrain.shortLabel) + \(bestBuild.frame.shortLabel) for pushing power")
+        case .endgameFocus:
+            reasons.append("Built around the high-value endgame challenge")
+        case .hybrid:
+            reasons.append("Versatile combo handles mixed scoring types")
+        case .classic:
+            reasons.append("Balanced build suits the all-round challenge")
+        }
+
+        if let piece = game.gamePieces.first, piece.idealIntake == bestBuild.intake {
+            reasons.append("\(bestBuild.intake.shortLabel) is ideal for \(piece.rawValue)")
+        }
+
+        bestReason = reasons.joined(separator: ". ")
+
+        return BuildRecommendation(
+            drivetrain: bestBuild.drivetrain,
+            frame: bestBuild.frame,
+            manipulator: bestBuild.manipulator,
+            intake: bestBuild.intake,
+            reasoning: bestReason,
+            expectedScore: bestScore
+        )
     }
 }

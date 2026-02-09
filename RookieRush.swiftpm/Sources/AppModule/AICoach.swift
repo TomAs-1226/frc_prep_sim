@@ -207,8 +207,14 @@ final class AICoach: ObservableObject {
         // Frame analysis
         if game.archetype == .speed && build.frame.speedModifier < 0 {
             lines.append("For a speed-focused game, a lighter frame would help your robot cycle faster. The \(build.frame.shortLabel) frame slowed you down.")
-        } else if game.archetype == .power && build.frame.reliabilityModifier > 0 {
+        } else if (game.archetype == .power || game.archetype == .defenseArena) && build.frame.reliabilityModifier > 0 {
             lines.append("Good frame choice for a power-focused game! The \(build.frame.shortLabel) frame's durability helps in physical matches.")
+        } else if game.archetype == .endgameFocus {
+            lines.append("In Endgame Focus games, the endgame challenge is worth \(game.endgameChallenge.points) points -- plan your entire build around getting there reliably.")
+        } else if game.archetype == .hybrid {
+            lines.append("Hybrid Challenge games reward versatility. A mechanism that can handle multiple scoring heights gives you an edge.")
+        } else if game.archetype == .defenseArena {
+            lines.append("Defense Arena is all about pushing power and durability. Tank drive with a steel frame is king here.")
         }
 
         // Match outcome

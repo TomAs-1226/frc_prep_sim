@@ -116,6 +116,8 @@ struct PreMatchView: View {
     @State private var selectedRole: RobotRole?
     @State private var selectedBuild = RobotBuild()
     @State private var selectedAuto: AutoPlan?
+    @State private var partTuning = PartTuning()
+    @State private var showTuning = false
 
     private let stepCount = 5
     private let stepLabels = ["Game", "Build", "Strategy", "Role", "Auto"]
@@ -767,6 +769,59 @@ struct PreMatchView: View {
                 }
             }
 
+            // Part tuning (collapsible)
+            VStack(spacing: 8) {
+                Button(action: { withAnimation { showTuning.toggle() } }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.caption)
+                        Text("Fine Tuning")
+                            .font(.subheadline.bold())
+                        Spacer()
+                        Image(systemName: showTuning ? "chevron.up" : "chevron.down")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.white.opacity(0.6))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.white.opacity(0.04))
+                    )
+                }
+
+                if showTuning {
+                    VStack(spacing: 14) {
+                        tuningSlider(label: "Speed / Torque",
+                                     leftLabel: "Torque", rightLabel: "Speed",
+                                     value: $partTuning.speedTorque,
+                                     color: .cyan)
+                        tuningSlider(label: "Aggression",
+                                     leftLabel: "Cautious", rightLabel: "Aggressive",
+                                     value: $partTuning.aggression,
+                                     color: .orange)
+                        tuningSlider(label: "Weight Balance",
+                                     leftLabel: "Rear", rightLabel: "Front",
+                                     value: $partTuning.weightBalance,
+                                     color: .purple)
+
+                        if !partTuning.isDefault {
+                            Button(action: { withAnimation { partTuning = PartTuning() } }) {
+                                Text("Reset to Default")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.white.opacity(0.5))
+                            }
+                        }
+                    }
+                    .padding(14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.white.opacity(0.03))
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+
             // Final build summary reminder
             VStack(spacing: 8) {
                 Text("YOUR SETUP")
@@ -1087,5 +1142,38 @@ struct PreMatchView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+    }
+
+    // MARK: - Tuning Slider
+
+    @ViewBuilder
+    private func tuningSlider(label: String, leftLabel: String, rightLabel: String,
+                               value: Binding<Float>, color: Color) -> some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text(label)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.6))
+                Spacer()
+                Text(String(format: "%+.1f", value.wrappedValue))
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(color.opacity(0.7))
+            }
+
+            HStack(spacing: 8) {
+                Text(leftLabel)
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.35))
+                    .frame(width: 50, alignment: .trailing)
+
+                Slider(value: value, in: -1.0...1.0, step: 0.1)
+                    .tint(color)
+
+                Text(rightLabel)
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.35))
+                    .frame(width: 50, alignment: .leading)
+            }
+        }
     }
 }

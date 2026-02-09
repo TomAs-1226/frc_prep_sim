@@ -294,8 +294,8 @@ class RobotAgent {
 
         // Barrier avoidance: if path crosses a barrier, route around it
         for obs in game.obstacles where obs.kind == .barrier {
-            let hx = obs.size.x / 2 + 0.20
-            let hz = obs.size.y / 2 + 0.20
+            let hx = obs.size.x / 2 + 0.28
+            let hz = obs.size.y / 2 + 0.28
             let relX = position.x - obs.position.x
             let relZ = position.y - obs.position.y
 
@@ -357,11 +357,11 @@ class RobotAgent {
         position.x += sin(heading) * speed * dt
         position.y += cos(heading) * speed * dt
 
-        // Clamp to field bounds
-        position.x = max(-FieldLayout.halfWidth + 0.15,
-                         min(FieldLayout.halfWidth - 0.15, position.x))
-        position.y = max(-FieldLayout.halfLength + 0.15,
-                         min(FieldLayout.halfLength - 0.15, position.y))
+        // Clamp to field bounds (with bumper clearance)
+        position.x = max(-FieldLayout.halfWidth + 0.22,
+                         min(FieldLayout.halfWidth - 0.22, position.x))
+        position.y = max(-FieldLayout.halfLength + 0.22,
+                         min(FieldLayout.halfLength - 0.22, position.y))
     }
 
     var hasReachedTarget: Bool {
@@ -994,6 +994,14 @@ final class MatchEngine: ObservableObject {
                             period: isAuto ? .auto : .teleop,
                             height: targetHeight
                         )
+                        // Spawn scoring particles
+                        if let scene = scene {
+                            FieldBuilder.spawnScoreParticles(
+                                at: SCNVector3(zone.position.x, targetHeight.sceneHeight + 0.05, zone.position.y),
+                                alliance: agent.config.alliance,
+                                scene: scene
+                            )
+                        }
                     }
                 }
             }
@@ -1078,10 +1086,12 @@ final class MatchEngine: ObservableObject {
         agent.speed = 0
     }
 
-    // MARK: - Separation (with push power)
+    // MARK: - Separation (with push power + collision particles)
+
+    private var lastCollisionDustTime: Double = 0
 
     private func resolveSeparation() {
-        let minDist: Float = 0.35
+        let minDist: Float = 0.42  // increased from 0.35 to prevent clipping
         for i in 0..<agents.count {
             for j in (i + 1)..<agents.count {
                 let dx = agents[j].position.x - agents[i].position.x
@@ -1099,14 +1109,29 @@ final class MatchEngine: ObservableObject {
                     let ratioI = pushJ / totalPush
                     let ratioJ = pushI / totalPush
 
-                    agents[i].position.x -= nx * overlap * 2 * ratioI
-                    agents[i].position.y -= nz * overlap * 2 * ratioI
-                    agents[j].position.x += nx * overlap * 2 * ratioJ
-                    agents[j].position.y += nz * overlap * 2 * ratioJ
+                    agents[i].position.x -= nx * overlap * 2.2 * ratioI
+                    agents[i].position.y -= nz * overlap * 2.2 * ratioI
+                    agents[j].position.x += nx * overlap * 2.2 * ratioJ
+                    agents[j].position.y += nz * overlap * 2.2 * ratioJ
 
-                    // Defenders slow opponents on contact
+                    // Spawn collision dust particles (throttled)
                     let isOpposing = agents[i].config.alliance
                         != agents[j].config.alliance
+                    if isOpposing && overlap > 0.02 && simTime - lastCollisionDustTime > 0.5 {
+                        lastCollisionDustTime = simTime
+                        if let scene = scene {
+                            let mid = SIMD2<Float>(
+                                (agents[i].position.x + agents[j].position.x) / 2,
+                                (agents[i].position.y + agents[j].position.y) / 2
+                            )
+                            FieldBuilder.spawnCollisionDust(
+                                at: SCNVector3(mid.x, 0.06, mid.y),
+                                scene: scene
+                            )
+                        }
+                    }
+
+                    // Defenders slow opponents on contact
                     if isOpposing {
                         if agents[i].config.role == .defender {
                             agents[j].speed *= 0.3
