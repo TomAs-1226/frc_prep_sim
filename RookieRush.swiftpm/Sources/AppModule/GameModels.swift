@@ -1415,7 +1415,7 @@ enum RobotFactory {
 
 // MARK: - Round Record
 
-struct RoundRecord: Codable, Identifiable {
+struct RoundRecord: Codable, Identifiable, Equatable {
     let id: UUID
     let gameName: String
     let archetype: String
