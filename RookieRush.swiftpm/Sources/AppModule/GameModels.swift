@@ -8,6 +8,8 @@ enum GamePhase: Equatable {
     case preMatch
     case simulation
     case results
+    case tournament
+    case tournamentResults
 }
 
 // MARK: - Alliance
@@ -154,12 +156,60 @@ enum AutoPlan: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Part Tuning
+
+struct PartTuning: Equatable {
+    /// Gear ratio: 0 = torque-biased, 1 = speed-biased
+    var gearRatio: Double = 0.5
+    /// Weight distribution: 0 = front-heavy (better traction), 1 = rear-heavy (better pushing)
+    var weightBalance: Double = 0.5
+    /// Mechanism precision: 0 = fast/sloppy, 1 = slow/precise
+    var mechanismTuning: Double = 0.5
+
+    var speedModifier: Float { Float((gearRatio - 0.5) * 0.4) }
+    var accelModifier: Float { Float((0.5 - gearRatio) * 0.3) }
+    var pushModifier: Float { Float((weightBalance - 0.5) * 0.3) }
+    var tractionModifier: Float { Float((0.5 - weightBalance) * 0.2) }
+    var scoringSpeedModifier: Double { (0.5 - mechanismTuning) * 0.4 }
+    var reliabilityModifier: Double { (mechanismTuning - 0.5) * 0.1 }
+}
+
 // MARK: - Robot Build Configuration
 
 struct RobotBuild: Equatable {
     var drivetrain: DrivetrainType = .swerve
     var mechanism: MechanismType = .elevator
     var intake: IntakeType = .claw
+    var tuning: PartTuning = PartTuning()
+    var accentColor: AccentColor = .orange
+
+    enum AccentColor: String, CaseIterable, Identifiable {
+        case orange = "Orange"
+        case purple = "Purple"
+        case teal = "Teal"
+        case gold = "Gold"
+        case white = "White"
+
+        var id: String { rawValue }
+        var uiColor: UIColor {
+            switch self {
+            case .orange: return .systemOrange
+            case .purple: return UIColor(red: 0.6, green: 0.2, blue: 0.8, alpha: 1)
+            case .teal:   return .systemTeal
+            case .gold:   return UIColor(red: 0.85, green: 0.75, blue: 0.2, alpha: 1)
+            case .white:  return UIColor(white: 0.9, alpha: 1)
+            }
+        }
+        var swiftUIColor: Color {
+            switch self {
+            case .orange: return .orange
+            case .purple: return .purple
+            case .teal:   return .teal
+            case .gold:   return Color(red: 0.85, green: 0.75, blue: 0.2)
+            case .white:  return Color(white: 0.9)
+            }
+        }
+    }
 }
 
 // MARK: - Drivetrain Type
@@ -660,17 +710,17 @@ enum RobotFactory {
         }
 
         let finalReliability = min(0.98, max(0.50,
-            baseReliability + mechReliabilityMod + intakeReliabilityMod))
+            baseReliability + mechReliabilityMod + intakeReliabilityMod + build.tuning.reliabilityModifier))
 
         return RobotStats(
-            maxSpeed: max(1.0, baseSpeed + mechSpeedMod + roleSpeedMod + b),
-            acceleration: baseAccel,
+            maxSpeed: max(1.0, baseSpeed + mechSpeedMod + roleSpeedMod + b + build.tuning.speedModifier),
+            acceleration: max(0.8, baseAccel + build.tuning.accelModifier),
             turnRate: baseTurn,
-            scoringTime: max(0.4, mechScoringTime + roleScoringMod),
+            scoringTime: max(0.3, mechScoringTime + roleScoringMod + build.tuning.scoringSpeedModifier),
             pickupTime: pickupTime,
             reliability: finalReliability,
             maxReefLevel: build.mechanism.maxLevel,
-            pushPower: basePush,
+            pushPower: min(1.0, max(0.1, basePush + build.tuning.pushModifier)),
             canDeepClimb: deepClimb
         )
     }
@@ -746,4 +796,244 @@ enum RobotFactory {
         case .defensive:  return .cycler
         }
     }
+}
+
+// MARK: - Tournament Configuration
+
+struct TournamentConfig: Equatable {
+    let matchCount: Int
+    let name: String
+
+    static let quickPlay   = TournamentConfig(matchCount: 3, name: "Quick Play")
+    static let regional    = TournamentConfig(matchCount: 5, name: "Regional")
+    static let championship = TournamentConfig(matchCount: 7, name: "Championship")
+
+    static let allConfigs: [TournamentConfig] = [.quickPlay, .regional, .championship]
+}
+
+// MARK: - Tournament State
+
+final class TournamentState: ObservableObject {
+    let config: TournamentConfig
+    let playerStrategy: AllianceStrategy
+    let playerRole: RobotRole
+    let playerBuild: RobotBuild
+    let playerAuto: AutoPlan
+
+    @Published var matchResults: [MatchResult] = []
+    @Published var currentMatchIndex: Int = 0
+    @Published var isComplete: Bool = false
+
+    init(config: TournamentConfig, strategy: AllianceStrategy, role: RobotRole,
+         build: RobotBuild, auto: AutoPlan) {
+        self.config = config
+        self.playerStrategy = strategy
+        self.playerRole = role
+        self.playerBuild = build
+        self.playerAuto = auto
+    }
+
+    /// Seed for the current match — ensures each match is unique.
+    var currentSeed: UInt64 {
+        UInt64(currentMatchIndex * 7919 + 42) ^ UInt64(config.matchCount * 1013)
+    }
+
+    /// Generate unique opponent composition for each match.
+    func opponentRoles(for matchIndex: Int) -> [RobotRole] {
+        var rng = SeededRNG(seed: UInt64(matchIndex * 3571 + 997))
+        let allRoles: [RobotRole] = [.scorer, .cycler, .defender]
+        var roles: [RobotRole] = []
+        for _ in 0..<3 {
+            let idx = rng.nextInt(0..<allRoles.count)
+            roles.append(allRoles[idx])
+        }
+        // Ensure at least one scorer in each match
+        if !roles.contains(.scorer) { roles[0] = .scorer }
+        return roles
+    }
+
+    /// Blue alliance strategy varies per match to keep things interesting.
+    func opponentStrategy(for matchIndex: Int) -> StrategyPolicy {
+        let patterns: [StrategyPolicy] = [
+            StrategyPolicy(scoringWeight: 0.6, defenseWeight: 0.2, endgameWeight: 0.2),  // balanced
+            StrategyPolicy(scoringWeight: 0.85, defenseWeight: 0.05, endgameWeight: 0.1), // aggressive
+            StrategyPolicy(scoringWeight: 0.4, defenseWeight: 0.4, endgameWeight: 0.2),   // defensive
+            StrategyPolicy(scoringWeight: 0.7, defenseWeight: 0.1, endgameWeight: 0.2),   // scoring-heavy
+            StrategyPolicy(scoringWeight: 0.5, defenseWeight: 0.3, endgameWeight: 0.2),   // def-leaning
+            StrategyPolicy(scoringWeight: 0.55, defenseWeight: 0.15, endgameWeight: 0.3), // endgame-push
+            StrategyPolicy(scoringWeight: 0.75, defenseWeight: 0.15, endgameWeight: 0.1), // pure scoring
+        ]
+        return patterns[matchIndex % patterns.count]
+    }
+
+    var wins: Int   { matchResults.filter { $0.playerWon }.count }
+    var losses: Int { matchResults.filter { !$0.playerWon && $0.margin > 0 }.count }
+    var ties: Int   { matchResults.filter { $0.margin == 0 }.count }
+
+    var totalRedScore: Int  { matchResults.reduce(0) { $0 + $1.redScore } }
+    var totalBlueScore: Int { matchResults.reduce(0) { $0 + $1.blueScore } }
+
+    var winRate: Double {
+        guard !matchResults.isEmpty else { return 0 }
+        return Double(wins) / Double(matchResults.count)
+    }
+
+    func recordResult(_ result: MatchResult) {
+        matchResults.append(result)
+        currentMatchIndex += 1
+        if currentMatchIndex >= config.matchCount {
+            isComplete = true
+        }
+    }
+}
+
+// MARK: - Procedural Match Generation
+
+enum MatchGenerator {
+    /// Team name pools for procedural generation.
+    private static let teamNamePool: [String] = [
+        "254", "1678", "118", "2056", "3310", "971", "1114", "2910", "148", "217",
+        "195", "33", "2767", "67", "399", "987", "1323", "4414", "469", "1690",
+        "330", "2471", "1706", "980", "846", "5406", "7461", "3538", "364", "2451"
+    ]
+
+    /// Generate a unique set of robot configs for a match with the given seed.
+    static func generateMatch(
+        playerRole: RobotRole,
+        strategy: AllianceStrategy,
+        playerBuild: RobotBuild,
+        seed: UInt64,
+        bluePolicy: StrategyPolicy? = nil,
+        blueRolesOverride: [RobotRole]? = nil
+    ) -> [RobotConfig] {
+        var rng = SeededRNG(seed: seed)
+        var configs: [RobotConfig] = []
+
+        // Pick unique team numbers
+        var availableTeams = teamNamePool.shuffled()
+        func nextTeam() -> String {
+            availableTeams.isEmpty ? "\(rng.nextInt(100..<10000))" : availableTeams.removeFirst()
+        }
+        // Re-shuffle with seed for determinism
+        availableTeams = []
+        var pool = teamNamePool
+        while !pool.isEmpty {
+            let idx = rng.nextInt(0..<pool.count)
+            availableTeams.append(pool.remove(at: idx))
+        }
+
+        // --- Red Alliance ---
+        let playerStats = RobotFactory.statsForBuild(playerBuild, role: playerRole, boost: true)
+        configs.append(RobotConfig(
+            id: 0, alliance: .red, role: playerRole,
+            stats: playerStats,
+            superstructure: RobotFactory.superstructureFor(playerBuild, role: playerRole),
+            build: playerBuild,
+            teamNumber: nextTeam(), startPosition: FieldLayout.redStarts[0]
+        ))
+
+        // Red teammates
+        let comp1Role = complementRole(for: strategy, playerRole: playerRole, slot: 1, rng: &rng)
+        let comp1Build = randomBuild(for: comp1Role, rng: &rng)
+        configs.append(RobotConfig(
+            id: 1, alliance: .red, role: comp1Role,
+            stats: RobotFactory.statsForBuild(comp1Build, role: comp1Role, boost: false),
+            superstructure: RobotFactory.superstructureFor(comp1Build, role: comp1Role),
+            build: comp1Build,
+            teamNumber: nextTeam(), startPosition: FieldLayout.redStarts[1]
+        ))
+
+        let comp2Role = complementRole(for: strategy, playerRole: playerRole, slot: 2, rng: &rng)
+        let comp2Build = randomBuild(for: comp2Role, rng: &rng)
+        configs.append(RobotConfig(
+            id: 2, alliance: .red, role: comp2Role,
+            stats: RobotFactory.statsForBuild(comp2Build, role: comp2Role, boost: false),
+            superstructure: RobotFactory.superstructureFor(comp2Build, role: comp2Role),
+            build: comp2Build,
+            teamNumber: nextTeam(), startPosition: FieldLayout.redStarts[2]
+        ))
+
+        // --- Blue Alliance ---
+        let blueRoles = blueRolesOverride ?? randomBlueRoles(rng: &rng)
+        for (i, role) in blueRoles.enumerated() {
+            let build = randomBuild(for: role, rng: &rng)
+            configs.append(RobotConfig(
+                id: 3 + i, alliance: .blue, role: role,
+                stats: RobotFactory.statsForBuild(build, role: role, boost: false),
+                superstructure: RobotFactory.superstructureFor(build, role: role),
+                build: build,
+                teamNumber: nextTeam(), startPosition: FieldLayout.blueStarts[i]
+            ))
+        }
+
+        return configs
+    }
+
+    private static func complementRole(for strategy: AllianceStrategy, playerRole: RobotRole,
+                                         slot: Int, rng: inout SeededRNG) -> RobotRole {
+        if slot == 1 {
+            switch strategy {
+            case .aggressive: return playerRole == .scorer ? .cycler : .scorer
+            case .balanced:   return .cycler
+            case .defensive:  return playerRole == .defender ? .cycler : .defender
+            }
+        } else {
+            switch strategy {
+            case .aggressive: return rng.nextDouble() < 0.7 ? .cycler : .scorer
+            case .balanced:   return playerRole == .defender ? .scorer : .cycler
+            case .defensive:  return .cycler
+            }
+        }
+    }
+
+    private static func randomBlueRoles(rng: inout SeededRNG) -> [RobotRole] {
+        let compositions: [[RobotRole]] = [
+            [.scorer, .cycler, .defender],
+            [.scorer, .scorer, .cycler],
+            [.cycler, .cycler, .defender],
+            [.scorer, .cycler, .cycler],
+            [.scorer, .defender, .cycler],
+        ]
+        let idx = rng.nextInt(0..<compositions.count)
+        return compositions[idx]
+    }
+
+    private static func randomBuild(for role: RobotRole, rng: inout SeededRNG) -> RobotBuild {
+        let dt: DrivetrainType
+        let mech: MechanismType
+        let intake: IntakeType
+        switch role {
+        case .scorer:
+            dt = rng.nextDouble() < 0.5 ? .swerve : .tank
+            let mr = rng.nextDouble()
+            mech = mr < 0.45 ? .elevator : (mr < 0.80 ? .arm : .simple)
+            intake = rng.nextDouble() < 0.60 ? .claw : .roller
+        case .cycler:
+            dt = rng.nextDouble() < 0.55 ? .swerve : .tank
+            let mr = rng.nextDouble()
+            mech = mr < 0.15 ? .elevator : (mr < 0.50 ? .arm : .simple)
+            intake = rng.nextDouble() < 0.35 ? .claw : .roller
+        case .defender:
+            dt = rng.nextDouble() < 0.30 ? .swerve : .tank
+            let mr = rng.nextDouble()
+            mech = mr < 0.10 ? .elevator : (mr < 0.40 ? .arm : .simple)
+            intake = rng.nextDouble() < 0.40 ? .claw : .roller
+        }
+        return RobotBuild(drivetrain: dt, mechanism: mech, intake: intake)
+    }
+}
+
+// MARK: - Sound Event
+
+enum SoundEvent {
+    case score
+    case miss
+    case collision
+    case matchStart
+    case matchEnd
+    case periodChange
+    case callout
+    case climb
+    case stall
+    case countdown
 }

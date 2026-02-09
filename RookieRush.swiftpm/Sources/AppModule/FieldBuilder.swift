@@ -684,215 +684,555 @@ enum FieldBuilder {
 }
 
 // MARK: - Robot Builder
+// Improved 3D robot models: mechanically realistic with frame structure,
+// proper proportions, no clipping, and accent color support.
 
 enum RobotBuilder {
 
-    // Shared wheel geometry
-    private static let swerveWheelGeo: SCNCylinder = {
-        let g = SCNCylinder(radius: 0.035, height: 0.025); g.radialSegmentCount = 12
-        let m = SCNMaterial(); m.diffuse.contents = UIColor.darkGray; g.materials = [m]; return g
+    // Shared materials
+    private static let darkMetalMat: SCNMaterial = {
+        let m = SCNMaterial()
+        m.diffuse.contents = UIColor(white: 0.18, alpha: 1)
+        m.metalness.contents = 0.5
+        m.roughness.contents = 0.6
+        return m
     }()
-    private static let swerveHousingGeo: SCNCylinder = {
-        let g = SCNCylinder(radius: 0.025, height: 0.02); g.radialSegmentCount = 12
-        let m = SCNMaterial(); m.diffuse.contents = UIColor(white: 0.3, alpha: 1); g.materials = [m]; return g
+
+    private static let lightMetalMat: SCNMaterial = {
+        let m = SCNMaterial()
+        m.diffuse.contents = UIColor(white: 0.45, alpha: 1)
+        m.metalness.contents = 0.4
+        m.roughness.contents = 0.5
+        return m
     }()
-    private static let tankWheelGeo: SCNCylinder = {
-        let g = SCNCylinder(radius: 0.04, height: 0.02); g.radialSegmentCount = 12
-        let m = SCNMaterial(); m.diffuse.contents = UIColor.darkGray; g.materials = [m]; return g
+
+    private static let frameMat: SCNMaterial = {
+        let m = SCNMaterial()
+        m.diffuse.contents = UIColor(white: 0.28, alpha: 1)
+        m.metalness.contents = 0.6
+        m.roughness.contents = 0.4
+        return m
     }()
+
+    private static let wheelMat: SCNMaterial = {
+        let m = SCNMaterial()
+        m.diffuse.contents = UIColor(white: 0.12, alpha: 1)
+        m.roughness.contents = 0.9
+        return m
+    }()
+
+    private static let wheelTreadMat: SCNMaterial = {
+        let m = SCNMaterial()
+        m.diffuse.contents = UIColor(white: 0.08, alpha: 1)
+        m.roughness.contents = 1.0
+        return m
+    }()
+
+    private static let housingMat: SCNMaterial = {
+        let m = SCNMaterial()
+        m.diffuse.contents = UIColor(white: 0.25, alpha: 1)
+        m.metalness.contents = 0.3
+        return m
+    }()
+
+    private static let batteryMat: SCNMaterial = {
+        let m = SCNMaterial()
+        m.diffuse.contents = UIColor(red: 0.15, green: 0.15, blue: 0.2, alpha: 1)
+        m.roughness.contents = 0.7
+        return m
+    }()
+
+    private static let electronicsMat: SCNMaterial = {
+        let m = SCNMaterial()
+        m.diffuse.contents = UIColor(red: 0.1, green: 0.3, blue: 0.15, alpha: 1)
+        return m
+    }()
+
+    // Robot dimensions — slightly rectangular (longer than wide) like real FRC bots
+    private static let chassisWidth: CGFloat = 0.30
+    private static let chassisHeight: CGFloat = 0.06
+    private static let chassisLength: CGFloat = 0.34
+    private static let bumperThickness: CGFloat = 0.025
 
     static func buildRobot(config: RobotConfig) -> SCNNode {
         let root = SCNNode()
         root.name = "robot_\(config.id)"
         let allianceColor = config.alliance.uiColor
+        let accentColor = config.build.accentColor.uiColor
 
-        let cW: CGFloat = 0.32, cH: CGFloat = 0.08, cL: CGFloat = 0.32
+        let cW = chassisWidth
+        let cH = chassisHeight
+        let cL = chassisLength
+        // Clearance = wheel diameter so chassis sits above wheels, wheels touch ground at y=0
+        let clearance: Float = config.build.drivetrain == .swerve ? 0.032 * 2 : 0.038 * 2
 
-        // Chassis
-        let chassisGeo = SCNBox(width: cW, height: cH, length: cL, chamferRadius: 0.01)
-        let chassisMat = SCNMaterial()
-        chassisMat.diffuse.contents = UIColor(white: 0.22, alpha: 1)
-        chassisMat.metalness.contents = 0.4
-        chassisGeo.materials = [chassisMat]
-        let chassis = SCNNode(geometry: chassisGeo)
-        chassis.position = SCNVector3(0, Float(cH / 2), 0)
-        root.addChildNode(chassis)
+        // ---- Frame / Bellypan ----
+        let bellypan = SCNBox(width: cW - 0.02, height: 0.008, length: cL - 0.02, chamferRadius: 0)
+        bellypan.materials = [frameMat]
+        let bellypanNode = SCNNode(geometry: bellypan)
+        bellypanNode.position = SCNVector3(0, clearance, 0)
+        root.addChildNode(bellypanNode)
 
-        // Bumpers
-        let bGeo = SCNBox(width: cW + 0.05, height: cH * 0.5, length: cL + 0.05, chamferRadius: 0.008)
-        let bMat = SCNMaterial()
-        bMat.diffuse.contents = allianceColor.withAlphaComponent(0.85)
-        bGeo.materials = [bMat]
-        let bumpers = SCNNode(geometry: bGeo)
-        bumpers.position = SCNVector3(0, Float(cH * 0.25), 0)
-        root.addChildNode(bumpers)
+        // Frame rails (C-channel style — 2 side rails + 2 cross members)
+        let railGeo = SCNBox(width: 0.015, height: CGFloat(clearance) + cH, length: cL, chamferRadius: 0.002)
+        railGeo.materials = [frameMat]
+        for side: Float in [-1, 1] {
+            let rail = SCNNode(geometry: railGeo)
+            rail.position = SCNVector3(side * Float(cW / 2 - 0.01), clearance + Float(cH / 2), 0)
+            root.addChildNode(rail)
+        }
 
-        // Wheels
+        // Cross members
+        let crossGeo = SCNBox(width: cW - 0.03, height: 0.012, length: 0.015, chamferRadius: 0)
+        crossGeo.materials = [frameMat]
+        for zFrac: Float in [-0.35, 0.35] {
+            let cross = SCNNode(geometry: crossGeo)
+            cross.position = SCNVector3(0, clearance + 0.004, zFrac * Float(cL))
+            root.addChildNode(cross)
+        }
+
+        // ---- Top plate (chassis deck) ----
+        let deckGeo = SCNBox(width: cW - 0.02, height: 0.008, length: cL - 0.02, chamferRadius: 0.003)
+        deckGeo.materials = [darkMetalMat]
+        let deckNode = SCNNode(geometry: deckGeo)
+        deckNode.position = SCNVector3(0, clearance + Float(cH) - 0.004, 0)
+        root.addChildNode(deckNode)
+
+        // ---- Bumpers (alliance color, slightly raised from ground) ----
+        let bumperH: CGFloat = 0.035
+        let bumperY = Float(clearance) + 0.005
+
+        // Front + back bumpers
+        for zSign: Float in [-1, 1] {
+            let bGeo = SCNBox(width: cW + bumperThickness * 2, height: bumperH,
+                              length: bumperThickness, chamferRadius: 0.004)
+            let bMat = SCNMaterial()
+            bMat.diffuse.contents = allianceColor.withAlphaComponent(0.9)
+            bGeo.materials = [bMat]
+            let bn = SCNNode(geometry: bGeo)
+            bn.position = SCNVector3(0, bumperY + Float(bumperH / 2),
+                                      zSign * Float(cL / 2 + bumperThickness / 2))
+            root.addChildNode(bn)
+        }
+        // Side bumpers
+        for xSign: Float in [-1, 1] {
+            let bGeo = SCNBox(width: bumperThickness, height: bumperH,
+                              length: cL, chamferRadius: 0.004)
+            let bMat = SCNMaterial()
+            bMat.diffuse.contents = allianceColor.withAlphaComponent(0.9)
+            bGeo.materials = [bMat]
+            let bn = SCNNode(geometry: bGeo)
+            bn.position = SCNVector3(xSign * Float(cW / 2 + bumperThickness / 2),
+                                      bumperY + Float(bumperH / 2), 0)
+            root.addChildNode(bn)
+        }
+        // Bumper corner fills
+        let cornerGeo = SCNBox(width: bumperThickness, height: bumperH,
+                               length: bumperThickness, chamferRadius: 0.006)
+        let cornerMat = SCNMaterial()
+        cornerMat.diffuse.contents = allianceColor.withAlphaComponent(0.85)
+        cornerGeo.materials = [cornerMat]
+        for xSign: Float in [-1, 1] {
+            for zSign: Float in [-1, 1] {
+                let cn = SCNNode(geometry: cornerGeo)
+                cn.position = SCNVector3(
+                    xSign * Float(cW / 2 + bumperThickness / 2),
+                    bumperY + Float(bumperH / 2),
+                    zSign * Float(cL / 2 + bumperThickness / 2)
+                )
+                root.addChildNode(cn)
+            }
+        }
+
+        // ---- Battery (centered low in chassis) ----
+        let battGeo = SCNBox(width: 0.08, height: 0.04, length: 0.10, chamferRadius: 0.003)
+        battGeo.materials = [batteryMat]
+        let battNode = SCNNode(geometry: battGeo)
+        battNode.position = SCNVector3(0, clearance + 0.024, -0.02)
+        root.addChildNode(battNode)
+
+        // ---- Electronics board ----
+        let boardGeo = SCNBox(width: 0.06, height: 0.008, length: 0.05, chamferRadius: 0)
+        boardGeo.materials = [electronicsMat]
+        let boardNode = SCNNode(geometry: boardGeo)
+        boardNode.position = SCNVector3(0.06, clearance + Float(cH) - 0.008, -0.06)
+        root.addChildNode(boardNode)
+
+        // ---- Wheels ----
         if config.build.drivetrain == .swerve {
             addSwerveWheels(to: root, cW: cW, cL: cL)
         } else {
             addTankWheels(to: root, cW: cW, cL: cL)
         }
 
-        // Superstructure
-        let baseY = Float(cH)
+        // ---- Superstructure ----
+        let baseY = clearance + Float(cH)
         switch config.superstructure {
-        case .elevator: addElevator(to: root, baseY: baseY, color: allianceColor)
-        case .arm:      addPivotArm(to: root, baseY: baseY, color: allianceColor)
-        case .intake:   addLowIntake(to: root, baseY: baseY, cL: Float(cL), color: allianceColor)
-        case .wedge:    addWedge(to: root, baseY: baseY, cW: Float(cW), cL: Float(cL), color: allianceColor)
+        case .elevator: addElevator(to: root, baseY: baseY, color: accentColor, cW: Float(cW))
+        case .arm:      addPivotArm(to: root, baseY: baseY, color: accentColor, cW: Float(cW))
+        case .intake:   addLowIntake(to: root, baseY: baseY, cL: Float(cL), cW: Float(cW), color: accentColor)
+        case .wedge:    addWedge(to: root, baseY: baseY, cW: Float(cW), cL: Float(cL), color: accentColor)
         }
 
-        // Team number plate
+        // ---- Team number (on front bumper) ----
         let label = SCNText(string: config.teamNumber, extrusionDepth: 0.002)
-        label.font = UIFont.monospacedDigitSystemFont(ofSize: 0.035, weight: .bold)
+        label.font = UIFont.monospacedDigitSystemFont(ofSize: 0.028, weight: .bold)
         label.flatness = 0.5
         let lMat = SCNMaterial(); lMat.diffuse.contents = UIColor.white
         label.materials = [lMat]
         let labelNode = SCNNode(geometry: label)
         let (mn, mx) = labelNode.boundingBox
         labelNode.pivot = SCNMatrix4MakeTranslation((mx.x - mn.x) / 2 + mn.x, 0, 0)
-        labelNode.position = SCNVector3(0, Float(cH * 0.6), Float(cL / 2) + 0.005)
+        labelNode.position = SCNVector3(0, bumperY + 0.005, Float(cL / 2 + bumperThickness) + 0.001)
         root.addChildNode(labelNode)
+
+        // ---- Accent stripe on top deck ----
+        let stripeGeo = SCNBox(width: cW - 0.06, height: 0.003, length: 0.015, chamferRadius: 0)
+        let stripeMat = SCNMaterial()
+        stripeMat.diffuse.contents = accentColor
+        stripeMat.emission.contents = accentColor.withAlphaComponent(0.3)
+        stripeGeo.materials = [stripeMat]
+        let stripeNode = SCNNode(geometry: stripeGeo)
+        stripeNode.position = SCNVector3(0, clearance + Float(cH) + 0.001, Float(cL / 2 - 0.03))
+        root.addChildNode(stripeNode)
 
         return root
     }
 
-    // MARK: - Drivetrain Visuals
+    // MARK: - Swerve Drive (4 independent modules)
 
     private static func addSwerveWheels(to root: SCNNode, cW: CGFloat, cL: CGFloat) {
         let positions: [(CGFloat, CGFloat)] = [
             (-cW/2 + 0.03, -cL/2 + 0.04), (cW/2 - 0.03, -cL/2 + 0.04),
             (-cW/2 + 0.03, cL/2 - 0.04), (cW/2 - 0.03, cL/2 - 0.04)
         ]
+        let wheelRadius: CGFloat = 0.032
+        let wheelWidth: CGFloat = 0.022
+        let housingRadius: CGFloat = 0.022
+        let housingHeight: CGFloat = 0.018
+        let wheelCenterY = Float(wheelRadius)  // Wheel sits on ground at y=0
+
         for (i, (ox, oz)) in positions.enumerated() {
-            let hn = SCNNode(geometry: swerveHousingGeo)
-            hn.position = SCNVector3(Float(ox), 0.01, Float(oz))
+            // Module housing (fork) — sits above wheel
+            let housingGeo = SCNCylinder(radius: housingRadius, height: housingHeight)
+            housingGeo.radialSegmentCount = 12
+            housingGeo.materials = [housingMat]
+            let hn = SCNNode(geometry: housingGeo)
+            hn.position = SCNVector3(Float(ox), wheelCenterY + Float(wheelRadius) + Float(housingHeight / 2), Float(oz))
             root.addChildNode(hn)
 
-            let wn = SCNNode(geometry: swerveWheelGeo)
+            // Fork prongs straddling wheel
+            let prongGeo = SCNBox(width: 0.006, height: CGFloat(wheelRadius) * 2 + 0.005, length: 0.006, chamferRadius: 0)
+            prongGeo.materials = [housingMat]
+            for pSide: Float in [-1, 1] {
+                let prong = SCNNode(geometry: prongGeo)
+                prong.position = SCNVector3(
+                    Float(ox) + pSide * Float(wheelWidth / 2 + 0.004),
+                    wheelCenterY,
+                    Float(oz)
+                )
+                root.addChildNode(prong)
+            }
+
+            // Wheel (center at wheelRadius so bottom touches y=0)
+            let wheelGeo = SCNCylinder(radius: wheelRadius, height: wheelWidth)
+            wheelGeo.radialSegmentCount = 16
+            wheelGeo.materials = [wheelTreadMat]
+            let wn = SCNNode(geometry: wheelGeo)
             wn.eulerAngles.z = .pi / 2
-            wn.position = SCNVector3(Float(ox), 0.035, Float(oz))
+            wn.position = SCNVector3(Float(ox), wheelCenterY, Float(oz))
             wn.name = "wheel_\(i)"
             root.addChildNode(wn)
+
+            // Hub cap
+            let hubGeo = SCNCylinder(radius: 0.008, height: wheelWidth + 0.004)
+            hubGeo.radialSegmentCount = 8
+            hubGeo.materials = [lightMetalMat]
+            let hubNode = SCNNode(geometry: hubGeo)
+            hubNode.eulerAngles.z = .pi / 2
+            hubNode.position = wn.position
+            root.addChildNode(hubNode)
         }
     }
 
+    // MARK: - Tank Drive (6 wheels with chain visual)
+
     private static func addTankWheels(to root: SCNNode, cW: CGFloat, cL: CGFloat) {
+        let wheelRadius: CGFloat = 0.038
+        let wheelWidth: CGFloat = 0.018
+        let wheelCenterY = Float(wheelRadius)  // Bottom of wheel at y=0
         var idx = 0
+
         for side: CGFloat in [-1, 1] {
-            for zOff: CGFloat in [-cL/2 + 0.05, 0, cL/2 - 0.05] {
-                let wn = SCNNode(geometry: tankWheelGeo)
+            let xPos = Float(side * (cW / 2 - 0.005))
+
+            for (j, zOff) in [CGFloat(-cL/2 + 0.06), CGFloat(0), CGFloat(cL/2 - 0.06)].enumerated() {
+                let wheelGeo = SCNCylinder(radius: wheelRadius, height: wheelWidth)
+                wheelGeo.radialSegmentCount = 16
+                wheelGeo.materials = [wheelTreadMat]
+                let wn = SCNNode(geometry: wheelGeo)
                 wn.eulerAngles.z = .pi / 2
-                wn.position = SCNVector3(Float(side * (cW/2 - 0.01)), 0.04, Float(zOff))
+                wn.position = SCNVector3(xPos, wheelCenterY, Float(zOff))
                 wn.name = "wheel_\(idx)"
                 root.addChildNode(wn)
                 idx += 1
+
+                let hubGeo = SCNCylinder(radius: 0.01, height: wheelWidth + 0.003)
+                hubGeo.radialSegmentCount = 8
+                hubGeo.materials = [lightMetalMat]
+                let hubNode = SCNNode(geometry: hubGeo)
+                hubNode.eulerAngles.z = .pi / 2
+                hubNode.position = wn.position
+                root.addChildNode(hubNode)
+
+                if j == 1 {
+                    let axleGeo = SCNCylinder(radius: 0.004, height: cW - 0.04)
+                    axleGeo.radialSegmentCount = 6
+                    axleGeo.materials = [lightMetalMat]
+                    let axle = SCNNode(geometry: axleGeo)
+                    axle.eulerAngles.z = .pi / 2
+                    axle.position = SCNVector3(0, wheelCenterY, Float(zOff))
+                    root.addChildNode(axle)
+                }
             }
+
+            // Chain/belt guard
+            let guardGeo = SCNBox(width: 0.005, height: CGFloat(wheelRadius * 2 - 0.01),
+                                   length: cL - 0.08, chamferRadius: 0)
+            let guardMat = SCNMaterial()
+            guardMat.diffuse.contents = UIColor(white: 0.2, alpha: 0.6)
+            guardGeo.materials = [guardMat]
+            let gn = SCNNode(geometry: guardGeo)
+            gn.position = SCNVector3(xPos + Float(side) * 0.012, wheelCenterY, 0)
+            root.addChildNode(gn)
         }
     }
 
-    // MARK: - Superstructures
+    // MARK: - Superstructures (improved mechanical detail)
 
-    private static func addElevator(to root: SCNNode, baseY: Float, color: UIColor) {
+    private static func addElevator(to root: SCNNode, baseY: Float, color: UIColor, cW: Float) {
         let railColor = UIColor(white: 0.45, alpha: 1)
+        let railSpacing: Float = cW * 0.35
 
-        for dx: Float in [-0.06, 0.06] {
-            let rail = SCNBox(width: 0.018, height: 0.38, length: 0.018, chamferRadius: 0)
-            let rm = SCNMaterial(); rm.diffuse.contents = railColor; rail.materials = [rm]
+        // Outer stage (fixed rails) — C-channel profile
+        for dx: Float in [-railSpacing, railSpacing] {
+            let rail = SCNBox(width: 0.020, height: 0.36, length: 0.020, chamferRadius: 0.002)
+            let rm = SCNMaterial(); rm.diffuse.contents = railColor; rm.metalness.contents = 0.3; rail.materials = [rm]
             let rn = SCNNode(geometry: rail)
-            rn.position = SCNVector3(dx, baseY + 0.19, -0.04)
+            rn.position = SCNVector3(dx, baseY + 0.18, -0.04)
             root.addChildNode(rn)
         }
 
+        // Cross braces on outer stage
+        let outerBrace = SCNBox(width: CGFloat(railSpacing * 2), height: 0.01, length: 0.01, chamferRadius: 0)
+        outerBrace.materials = [SCNMaterial().also { $0.diffuse.contents = railColor }]
+        for yOff: Float in [0.06, 0.22, 0.35] {
+            let b = SCNNode(geometry: outerBrace)
+            b.position = SCNVector3(0, baseY + yOff, -0.04)
+            root.addChildNode(b)
+        }
+
+        // Inner stage (moving carriage)
         let innerStage = SCNNode(); innerStage.name = "elevator_stage"
-        for dx: Float in [-0.04, 0.04] {
-            let inner = SCNBox(width: 0.012, height: 0.30, length: 0.012, chamferRadius: 0)
-            let im = SCNMaterial(); im.diffuse.contents = UIColor(white: 0.55, alpha: 1); inner.materials = [im]
+        let innerSpacing: Float = railSpacing - 0.015
+        for dx: Float in [-innerSpacing, innerSpacing] {
+            let inner = SCNBox(width: 0.012, height: 0.28, length: 0.012, chamferRadius: 0)
+            let im = SCNMaterial(); im.diffuse.contents = UIColor(white: 0.58, alpha: 1); im.metalness.contents = 0.4
+            inner.materials = [im]
             let iNode = SCNNode(geometry: inner)
-            iNode.position = SCNVector3(dx, 0.15, 0)
+            iNode.position = SCNVector3(dx, 0.14, 0)
             innerStage.addChildNode(iNode)
         }
-        innerStage.position = SCNVector3(0, baseY + 0.08, -0.04)
-        root.addChildNode(innerStage)
 
-        let claw = SCNBox(width: 0.10, height: 0.025, length: 0.06, chamferRadius: 0.005)
+        // Carriage plate
+        let carriageGeo = SCNBox(width: CGFloat(innerSpacing * 2 + 0.02), height: 0.008,
+                                  length: 0.04, chamferRadius: 0.002)
+        let carriageMat = SCNMaterial(); carriageMat.diffuse.contents = color.withAlphaComponent(0.8)
+        carriageGeo.materials = [carriageMat]
+        let carriageNode = SCNNode(geometry: carriageGeo)
+        carriageNode.position = SCNVector3(0, 0.28, 0.01)
+        innerStage.addChildNode(carriageNode)
+
+        // Claw/gripper
+        let clawBase = SCNBox(width: 0.08, height: 0.015, length: 0.05, chamferRadius: 0.003)
         let clawMat = SCNMaterial(); clawMat.diffuse.contents = color.withAlphaComponent(0.7)
-        claw.materials = [clawMat]
-        let clawNode = SCNNode(geometry: claw)
-        clawNode.position = SCNVector3(0, 0.30, 0.02)
+        clawBase.materials = [clawMat]
+        let clawNode = SCNNode(geometry: clawBase)
+        clawNode.position = SCNVector3(0, 0.29, 0.03)
         innerStage.addChildNode(clawNode)
 
-        let brace = SCNBox(width: 0.12, height: 0.01, length: 0.01, chamferRadius: 0)
-        let brMat = SCNMaterial(); brMat.diffuse.contents = railColor; brace.materials = [brMat]
-        let brNode = SCNNode(geometry: brace)
-        brNode.position = SCNVector3(0, baseY + 0.37, -0.04)
-        root.addChildNode(brNode)
+        // Claw fingers
+        let fingerGeo = SCNBox(width: 0.008, height: 0.025, length: 0.015, chamferRadius: 0.002)
+        fingerGeo.materials = [clawMat]
+        for fSide: Float in [-0.028, 0.028] {
+            let finger = SCNNode(geometry: fingerGeo)
+            finger.position = SCNVector3(fSide, 0.30, 0.045)
+            innerStage.addChildNode(finger)
+        }
+
+        innerStage.position = SCNVector3(0, baseY + 0.06, -0.04)
+        root.addChildNode(innerStage)
+
+        // Mounting gusset at base
+        let gussetGeo = SCNBox(width: CGFloat(railSpacing * 2 + 0.03), height: 0.025,
+                                length: 0.035, chamferRadius: 0.003)
+        gussetGeo.materials = [frameMat]
+        let gussetNode = SCNNode(geometry: gussetGeo)
+        gussetNode.position = SCNVector3(0, baseY + 0.012, -0.04)
+        root.addChildNode(gussetNode)
     }
 
-    private static func addPivotArm(to root: SCNNode, baseY: Float, color: UIColor) {
-        let pivotY = baseY + 0.04
-        let armLen: Float = 0.28
-        let arm = SCNCylinder(radius: 0.012, height: CGFloat(armLen)); arm.radialSegmentCount = 8
-        let aMat = SCNMaterial(); aMat.diffuse.contents = UIColor.systemOrange; arm.materials = [aMat]
-        let armNode = SCNNode(geometry: arm)
-        armNode.position = SCNVector3(0, pivotY + armLen * 0.4, 0.02)
-        armNode.eulerAngles.x = 0.35; armNode.name = "pivot_arm"
-        root.addChildNode(armNode)
+    private static func addPivotArm(to root: SCNNode, baseY: Float, color: UIColor, cW: Float) {
+        let pivotY = baseY + 0.03
 
-        let grip = SCNBox(width: 0.08, height: 0.02, length: 0.05, chamferRadius: 0.005)
-        let gMat = SCNMaterial(); gMat.diffuse.contents = color.withAlphaComponent(0.7)
-        grip.materials = [gMat]
-        let gripNode = SCNNode(geometry: grip)
-        gripNode.position = SCNVector3(0, pivotY + armLen * 0.7, 0.10)
-        root.addChildNode(gripNode)
+        // Pivot tower (two uprights + axle)
+        let towerSpacing: Float = cW * 0.25
+        let towerGeo = SCNBox(width: 0.015, height: 0.08, length: 0.025, chamferRadius: 0.002)
+        towerGeo.materials = [frameMat]
+        for side: Float in [-towerSpacing, towerSpacing] {
+            let tower = SCNNode(geometry: towerGeo)
+            tower.position = SCNVector3(side, pivotY + 0.04, -0.06)
+            root.addChildNode(tower)
+        }
 
-        let base = SCNCylinder(radius: 0.025, height: 0.03); base.radialSegmentCount = 12
-        let bMat = SCNMaterial(); bMat.diffuse.contents = UIColor(white: 0.35, alpha: 1)
-        base.materials = [bMat]
-        let bn = SCNNode(geometry: base)
-        bn.position = SCNVector3(0, pivotY, -0.06)
-        root.addChildNode(bn)
+        // Pivot axle
+        let axleGeo = SCNCylinder(radius: 0.006, height: CGFloat(towerSpacing * 2 + 0.01))
+        axleGeo.radialSegmentCount = 8
+        axleGeo.materials = [lightMetalMat]
+        let axle = SCNNode(geometry: axleGeo)
+        axle.eulerAngles.z = .pi / 2
+        axle.position = SCNVector3(0, pivotY + 0.07, -0.06)
+        root.addChildNode(axle)
+
+        // Arm (compound node that pivots)
+        let armLen: Float = 0.26
+        let armContainer = SCNNode()
+        armContainer.name = "pivot_arm"
+        armContainer.position = SCNVector3(0, pivotY + 0.07, -0.06)
+
+        // Arm tube
+        let armGeo = SCNBox(width: 0.022, height: CGFloat(armLen), length: 0.018, chamferRadius: 0.003)
+        let armMat = SCNMaterial(); armMat.diffuse.contents = color; armMat.metalness.contents = 0.3
+        armGeo.materials = [armMat]
+        let armTube = SCNNode(geometry: armGeo)
+        armTube.position = SCNVector3(0, armLen / 2, 0.04)
+        armContainer.addChildNode(armTube)
+
+        // Gripper at end
+        let gripGeo = SCNBox(width: 0.07, height: 0.018, length: 0.04, chamferRadius: 0.004)
+        let gripMat = SCNMaterial(); gripMat.diffuse.contents = color.withAlphaComponent(0.7)
+        gripGeo.materials = [gripMat]
+        let grip = SCNNode(geometry: gripGeo)
+        grip.position = SCNVector3(0, armLen - 0.01, 0.06)
+        armContainer.addChildNode(grip)
+
+        // Grip fingers
+        let fGeo = SCNBox(width: 0.006, height: 0.02, length: 0.012, chamferRadius: 0.001)
+        fGeo.materials = [gripMat]
+        for fx: Float in [-0.025, 0.025] {
+            let fn = SCNNode(geometry: fGeo)
+            fn.position = SCNVector3(fx, armLen - 0.01, 0.08)
+            armContainer.addChildNode(fn)
+        }
+
+        armContainer.eulerAngles.x = 0.35
+        root.addChildNode(armContainer)
+
+        // Gusset plate at base
+        let gussetGeo = SCNBox(width: CGFloat(towerSpacing * 2 + 0.02), height: 0.02,
+                                length: 0.04, chamferRadius: 0.003)
+        gussetGeo.materials = [frameMat]
+        let gusset = SCNNode(geometry: gussetGeo)
+        gusset.position = SCNVector3(0, baseY + 0.01, -0.06)
+        root.addChildNode(gusset)
     }
 
-    private static func addLowIntake(to root: SCNNode, baseY: Float, cL: Float, color: UIColor) {
-        let roller = SCNCylinder(radius: 0.028, height: 0.22); roller.radialSegmentCount = 12
-        let rMat = SCNMaterial(); rMat.diffuse.contents = UIColor.systemTeal; roller.materials = [rMat]
-        let rn = SCNNode(geometry: roller)
+    private static func addLowIntake(to root: SCNNode, baseY: Float, cL: Float, cW: Float, color: UIColor) {
+        let rollerRadius: Float = 0.025
+        let rollerWidth: Float = cW * 0.7
+
+        // Intake frame (two side plates)
+        let sideGeo = SCNBox(width: 0.008, height: 0.05, length: 0.10, chamferRadius: 0.002)
+        sideGeo.materials = [frameMat]
+        for side: Float in [-rollerWidth / 2 - 0.01, rollerWidth / 2 + 0.01] {
+            let sn = SCNNode(geometry: sideGeo)
+            sn.position = SCNVector3(side, baseY + 0.025, cL / 2 + 0.03)
+            root.addChildNode(sn)
+        }
+
+        // Spinner roller (main)
+        let rollerGeo = SCNCylinder(radius: CGFloat(rollerRadius), height: CGFloat(rollerWidth))
+        rollerGeo.radialSegmentCount = 12
+        let rollerMat = SCNMaterial(); rollerMat.diffuse.contents = UIColor.systemTeal
+        rollerGeo.materials = [rollerMat]
+        let rn = SCNNode(geometry: rollerGeo)
         rn.eulerAngles.z = .pi / 2
-        rn.position = SCNVector3(0, baseY + 0.028, cL / 2 + 0.02)
+        rn.position = SCNVector3(0, baseY + rollerRadius, cL / 2 + 0.04)
         rn.name = "intake_roller"
         root.addChildNode(rn)
 
-        let guard_ = SCNBox(width: 0.24, height: 0.04, length: 0.06, chamferRadius: 0)
-        let gMat = SCNMaterial(); gMat.diffuse.contents = color.withAlphaComponent(0.4)
-        guard_.materials = [gMat]
-        let gn = SCNNode(geometry: guard_)
-        gn.position = SCNVector3(0, baseY + 0.06, cL / 2 + 0.01)
-        root.addChildNode(gn)
+        // Secondary roller (polycarbonate guard)
+        let guardRoller = SCNCylinder(radius: CGFloat(rollerRadius * 0.6), height: CGFloat(rollerWidth - 0.02))
+        guardRoller.radialSegmentCount = 10
+        let grMat = SCNMaterial(); grMat.diffuse.contents = color.withAlphaComponent(0.5)
+        guardRoller.materials = [grMat]
+        let grn = SCNNode(geometry: guardRoller)
+        grn.eulerAngles.z = .pi / 2
+        grn.position = SCNVector3(0, baseY + 0.05, cL / 2 + 0.02)
+        root.addChildNode(grn)
 
-        let hopper = SCNBox(width: 0.14, height: 0.03, length: 0.10, chamferRadius: 0.005)
-        let hMat = SCNMaterial(); hMat.diffuse.contents = UIColor(white: 0.3, alpha: 1)
-        hopper.materials = [hMat]
-        let hn = SCNNode(geometry: hopper)
-        hn.position = SCNVector3(0, baseY + 0.015, 0)
+        // Hopper funnel
+        let hGeo = SCNBox(width: CGFloat(rollerWidth - 0.02), height: 0.025, length: 0.08, chamferRadius: 0.004)
+        let hMat = SCNMaterial(); hMat.diffuse.contents = UIColor(white: 0.25, alpha: 1)
+        hGeo.materials = [hMat]
+        let hn = SCNNode(geometry: hGeo)
+        hn.position = SCNVector3(0, baseY + 0.012, 0.02)
         root.addChildNode(hn)
+
+        // Mounting bracket
+        let bracketGeo = SCNBox(width: CGFloat(rollerWidth + 0.02), height: 0.015, length: 0.02, chamferRadius: 0)
+        bracketGeo.materials = [frameMat]
+        let bracket = SCNNode(geometry: bracketGeo)
+        bracket.position = SCNVector3(0, baseY + 0.008, cL / 2 - 0.01)
+        root.addChildNode(bracket)
     }
 
     private static func addWedge(to root: SCNNode, baseY: Float, cW: Float, cL: Float, color: UIColor) {
-        let wedge = SCNBox(width: CGFloat(cW + 0.02), height: 0.04, length: 0.18, chamferRadius: 0.005)
-        let wMat = SCNMaterial(); wMat.diffuse.contents = UIColor.systemGreen; wedge.materials = [wMat]
-        let wn = SCNNode(geometry: wedge)
-        wn.position = SCNVector3(0, baseY + 0.02, cL / 2 + 0.06)
-        wn.eulerAngles.x = -0.15
+        // Angled plow plate
+        let wedgeGeo = SCNBox(width: CGFloat(cW + 0.02), height: 0.006, length: 0.16, chamferRadius: 0.003)
+        let wMat = SCNMaterial(); wMat.diffuse.contents = UIColor.systemGreen; wMat.metalness.contents = 0.4
+        wedgeGeo.materials = [wMat]
+        let wn = SCNNode(geometry: wedgeGeo)
+        wn.position = SCNVector3(0, baseY + 0.015, cL / 2 + 0.05)
+        wn.eulerAngles.x = -0.18
         root.addChildNode(wn)
 
-        let plate = SCNBox(width: CGFloat(cW + 0.04), height: 0.10, length: 0.015, chamferRadius: 0)
-        let pMat = SCNMaterial(); pMat.diffuse.contents = color.withAlphaComponent(0.6)
-        plate.materials = [pMat]
-        let pn = SCNNode(geometry: plate)
-        pn.position = SCNVector3(0, baseY + 0.05, cL / 2 + 0.14)
+        // Reinforcement ribs
+        let ribGeo = SCNBox(width: 0.008, height: 0.04, length: 0.14, chamferRadius: 0)
+        ribGeo.materials = [frameMat]
+        for x: Float in stride(from: -cW * 0.35, through: cW * 0.35, by: cW * 0.35) {
+            let rib = SCNNode(geometry: ribGeo)
+            rib.position = SCNVector3(x, baseY + 0.02, cL / 2 + 0.03)
+            rib.eulerAngles.x = -0.18
+            root.addChildNode(rib)
+        }
+
+        // Push plate (vertical face)
+        let plateGeo = SCNBox(width: CGFloat(cW + 0.04), height: 0.08, length: 0.012, chamferRadius: 0.002)
+        let pMat = SCNMaterial(); pMat.diffuse.contents = color.withAlphaComponent(0.7)
+        plateGeo.materials = [pMat]
+        let pn = SCNNode(geometry: plateGeo)
+        pn.position = SCNVector3(0, baseY + 0.04, cL / 2 + 0.12)
         root.addChildNode(pn)
+
+        // Bull bar at top
+        let barGeo = SCNCylinder(radius: 0.008, height: CGFloat(cW + 0.03))
+        barGeo.radialSegmentCount = 8
+        barGeo.materials = [frameMat]
+        let bar = SCNNode(geometry: barGeo)
+        bar.eulerAngles.z = .pi / 2
+        bar.position = SCNVector3(0, baseY + 0.08, cL / 2 + 0.12)
+        root.addChildNode(bar)
     }
 
     // MARK: - Add All Robots to Scene
@@ -905,5 +1245,15 @@ enum RobotBuilder {
             scene.rootNode.addChildNode(robot)
             return robot
         }
+    }
+}
+
+// MARK: - SCNMaterial Helper
+
+extension SCNMaterial {
+    @discardableResult
+    func also(_ block: (SCNMaterial) -> Void) -> SCNMaterial {
+        block(self)
+        return self
     }
 }

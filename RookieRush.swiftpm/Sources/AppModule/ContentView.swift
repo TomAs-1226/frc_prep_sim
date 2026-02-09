@@ -3,6 +3,7 @@ import SwiftUI
 // MARK: - Content View
 
 /// Main coordinator: Intro → PreMatch → Simulation → Results
+/// Also supports: Tournament flow with series of matches
 struct ContentView: View {
     @State private var phase: GamePhase = .intro
     @State private var strategy: AllianceStrategy?
@@ -12,19 +13,41 @@ struct ContentView: View {
     @State private var matchResult: MatchResult?
     @State private var showSettings = false
 
+    // Tournament
+    @State private var tournamentConfig: TournamentConfig?
+    @State private var tournament: TournamentState?
+    @State private var inTournament = false
+    @State private var matchSeed: UInt64 = 42
+    @State private var blueMatchPolicy: StrategyPolicy?
+
     var body: some View {
         ZStack {
             Group {
                 switch phase {
                 case .intro:
-                    IntroView(onStart: {
-                        withAnimation(.easeInOut(duration: 0.4)) { phase = .preMatch }
-                    })
+                    IntroView(
+                        onStart: {
+                            inTournament = false
+                            matchSeed = UInt64.random(in: 1...100000)
+                            blueMatchPolicy = nil
+                            withAnimation(.easeInOut(duration: 0.4)) { phase = .preMatch }
+                        },
+                        onTournament: {
+                            withAnimation(.easeInOut(duration: 0.4)) { phase = .tournament }
+                        }
+                    )
                     .transition(.opacity)
 
                 case .preMatch:
                     PreMatchView { strat, r, build, auto in
                         strategy = strat; role = r; robotBuild = build; autoPlan = auto
+                        if inTournament, let config = tournamentConfig {
+                            let ts = TournamentState(config: config, strategy: strat,
+                                                      role: r, build: build, auto: auto)
+                            tournament = ts
+                            matchSeed = ts.currentSeed
+                            blueMatchPolicy = ts.opponentStrategy(for: 0)
+                        }
                         withAnimation(.easeInOut(duration: 0.4)) { phase = .simulation }
                     }
                     .transition(.asymmetric(
@@ -34,16 +57,57 @@ struct ContentView: View {
 
                 case .simulation:
                     if let strat = strategy, let r = role, let build = robotBuild, let auto = autoPlan {
-                        MatchView(strategy: strat, playerRole: r, playerBuild: build, autoPlan: auto) { result in
-                            matchResult = result
-                            withAnimation(.easeInOut(duration: 0.5)) { phase = .results }
+                        MatchView(
+                            strategy: strat, playerRole: r, playerBuild: build,
+                            autoPlan: auto, seed: matchSeed, bluePolicy: blueMatchPolicy
+                        ) { result in
+                            handleMatchResult(result)
                         }
+                        .id(matchSeed) // Force new view for each match
                         .transition(.opacity)
                     }
 
                 case .results:
                     if let result = matchResult {
-                        ResultsView(result: result, onTryAgain: { resetGame() })
+                        ResultsView(
+                            result: result,
+                            tournament: tournament,
+                            onTryAgain: {
+                                if inTournament, let ts = tournament, !ts.isComplete {
+                                    // Continue tournament — start next match
+                                    matchSeed = ts.currentSeed
+                                    blueMatchPolicy = ts.opponentStrategy(for: ts.currentMatchIndex)
+                                    withAnimation(.easeInOut(duration: 0.4)) { phase = .simulation }
+                                } else {
+                                    resetGame()
+                                }
+                            }
+                        )
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .opacity
+                        ))
+                    }
+
+                case .tournament:
+                    TournamentSelectView(
+                        onSelect: { config in
+                            tournamentConfig = config
+                            inTournament = true
+                            withAnimation(.easeInOut(duration: 0.4)) { phase = .preMatch }
+                        },
+                        onBack: {
+                            withAnimation(.easeInOut(duration: 0.4)) { phase = .intro }
+                        }
+                    )
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
+
+                case .tournamentResults:
+                    if let ts = tournament {
+                        TournamentResultsView(tournament: ts) { resetGame() }
                             .transition(.asymmetric(
                                 insertion: .move(edge: .trailing).combined(with: .opacity),
                                 removal: .opacity
@@ -53,7 +117,7 @@ struct ContentView: View {
             }
             .animation(.easeInOut(duration: 0.4), value: phase)
 
-            // Settings button (hidden during match)
+            // Settings button
             if phase != .simulation {
                 VStack {
                     HStack {
@@ -67,6 +131,23 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
+    }
+
+    // MARK: - Match Result Handling
+
+    private func handleMatchResult(_ result: MatchResult) {
+        matchResult = result
+
+        if inTournament, let ts = tournament {
+            ts.recordResult(result)
+            if ts.isComplete {
+                withAnimation(.easeInOut(duration: 0.5)) { phase = .tournamentResults }
+            } else {
+                withAnimation(.easeInOut(duration: 0.5)) { phase = .results }
+            }
+        } else {
+            withAnimation(.easeInOut(duration: 0.5)) { phase = .results }
+        }
     }
 
     private var settingsButton: some View {
@@ -83,6 +164,8 @@ struct ContentView: View {
 
     private func resetGame() {
         strategy = nil; role = nil; robotBuild = nil; autoPlan = nil; matchResult = nil
+        inTournament = false; tournamentConfig = nil; tournament = nil
+        blueMatchPolicy = nil; matchSeed = 42
         withAnimation(.easeInOut(duration: 0.4)) { phase = .intro }
     }
 }

@@ -214,6 +214,64 @@ final class AICoach: ObservableObject {
             lines.append("Good use of callouts! You used \(result.calloutsUsed.count) strategic adjustments. In real FRC, drive coaches constantly adapt — you're thinking like one.")
         }
 
+        // Build-specific recommendations
+        lines.append(buildRecommendation(for: result))
+
+        // Tuning advice
+        let tuning = result.playerBuild.tuning
+        if tuning.gearRatio != 0.5 || tuning.weightBalance != 0.5 || tuning.mechanismTuning != 0.5 {
+            lines.append(tuningAdvice(for: result))
+        }
+
         return lines.joined(separator: "\n\n")
+    }
+
+    // MARK: - Build Recommendations
+
+    func buildRecommendation(for result: MatchResult) -> String {
+        let build = result.playerBuild
+        let scored = result.playerRobotScored
+        let cycles = result.playerRobotCycled
+
+        // Suggest alternative builds based on performance
+        if build.mechanism == .elevator && scored < 3 {
+            return "Build tip: Your Elevator reached L4 but only scored \(scored) pieces. Consider Arm mechanism — it's faster (L3 max) and often scores more total points through quicker cycles."
+        }
+
+        if build.mechanism == .simple && result.playerRole == .scorer {
+            return "Build tip: Simple mechanism as a Scorer only reaches L2 (\(scored) scored). Upgrade to Arm (L3, +1pt/piece) or Elevator (L4, +2pts/piece) for a scorer role."
+        }
+
+        if build.drivetrain == .swerve && result.playerRole == .defender {
+            return "Build tip: Swerve drive is fast but weak for pushing. Defenders benefit from Tank drive's push power — try Tank + Simple/Arm with a defender role."
+        }
+
+        if build.intake == .roller && result.didPlayerStall {
+            return "Build tip: Roller intake is fast but less reliable. Consider Claw intake — it's 8% more reliable, which matters when your robot stalled this match."
+        }
+
+        if cycles > 5 && build.mechanism != .simple {
+            return "Build tip: Great cycling (\(cycles) cycles)! Your \(build.mechanism.shortLabel) works well. To cycle even faster, consider Simple mechanism — it trades reach for speed."
+        }
+
+        return ""
+    }
+
+    func tuningAdvice(for result: MatchResult) -> String {
+        let tuning = result.playerBuild.tuning
+
+        if tuning.gearRatio > 0.7 && result.playerRobotScored < 3 {
+            return "Tuning tip: Your speed-biased gear ratio (%.0f%%) didn't translate to more scores. Try 50%% for balanced acceleration — getting to scoring position fast matters more than top speed."
+        }
+
+        if tuning.mechanismTuning < 0.3 && result.didPlayerStall {
+            return "Tuning tip: Fast mechanism tuning increases stall risk. Raise precision to 60-70%% for more consistent scoring."
+        }
+
+        if tuning.weightBalance > 0.7 && result.playerRole != .defender {
+            return "Tuning tip: Rear-heavy weight balance boosts pushing but reduces traction. As a \(result.playerRole.rawValue), try 50%% balance for smoother driving."
+        }
+
+        return "Your custom tuning affected the match. Experiment with different slider positions to find your optimal setup!"
     }
 }

@@ -269,24 +269,41 @@ class RobotAgent {
         guard let target = targetPosition else { return }
 
         // --- Obstacle avoidance: center skybridge ---
-        // If the direct path crosses the center structure, steer around it
-        let obstacleHalf: Float = FieldSpec.bargeTrussDepth / 2 + 0.15
-        let obstacleSpanHalf: Float = FieldSpec.bargeTrussSpan / 2 + 0.1
-        let effectiveTarget: SIMD2<Float>
+        let obstacleHalf: Float = FieldSpec.bargeTrussDepth / 2 + 0.20
+        let obstacleSpanHalf: Float = FieldSpec.bargeTrussSpan / 2 + 0.15
+        var effectiveTarget: SIMD2<Float>
         let crossingCenter = (position.x > obstacleHalf && target.x < -obstacleHalf) ||
                              (position.x < -obstacleHalf && target.x > obstacleHalf)
         if crossingCenter && abs(position.y) < obstacleSpanHalf {
-            // Route to the nearest edge of the obstacle, then continue to target
             let detourZ: Float = position.y >= 0
-                ? obstacleSpanHalf + 0.2
-                : -(obstacleSpanHalf + 0.2)
-            effectiveTarget = SIMD2<Float>(position.x > 0 ? obstacleHalf + 0.1 : -(obstacleHalf + 0.1), detourZ)
+                ? obstacleSpanHalf + 0.25
+                : -(obstacleSpanHalf + 0.25)
+            effectiveTarget = SIMD2<Float>(position.x > 0 ? obstacleHalf + 0.15 : -(obstacleHalf + 0.15), detourZ)
         } else if abs(position.x) < obstacleHalf && abs(position.y) < obstacleSpanHalf {
-            // Currently inside obstacle zone — push out to nearest side
-            let pushX: Float = position.x >= 0 ? obstacleHalf + 0.1 : -(obstacleHalf + 0.1)
+            let pushX: Float = position.x >= 0 ? obstacleHalf + 0.15 : -(obstacleHalf + 0.15)
             effectiveTarget = SIMD2<Float>(pushX, position.y)
         } else {
             effectiveTarget = target
+        }
+
+        // --- Obstacle avoidance: reef hexagons ---
+        for center in [FieldSpec.redReefCenter, FieldSpec.blueReefCenter] {
+            let reefDist = distance2D(position, center)
+            let reefRadius = FieldSpec.reefApothem + 0.22  // Keep outside reef + bumper clearance
+            if reefDist < reefRadius && reefDist > 0.01 {
+                // Only push away if not targeting this reef's face
+                let targetToReef = distance2D(effectiveTarget, center)
+                if targetToReef > reefRadius * 0.8 {
+                    // Push radially outward from reef center
+                    let nx = (position.x - center.x) / reefDist
+                    let nz = (position.y - center.y) / reefDist
+                    let pushDist = (reefRadius - reefDist) * 0.5
+                    effectiveTarget = SIMD2<Float>(
+                        position.x + nx * pushDist + (effectiveTarget.x - position.x) * 0.5,
+                        position.y + nz * pushDist + (effectiveTarget.y - position.y) * 0.5
+                    )
+                }
+            }
         }
 
         let dx = effectiveTarget.x - position.x
@@ -294,8 +311,6 @@ class RobotAgent {
         let dist = sqrt(dx * dx + dz * dz)
 
         if dist < 0.15 {
-            // Check if this was a detour — if we reached the detour point, the actual
-            // target is still the original. Let decideGoal re-evaluate.
             speed = 0
             return
         }
@@ -317,13 +332,28 @@ class RobotAgent {
         position.x += sin(heading) * speed * dt
         position.y += cos(heading) * speed * dt
 
-        // Clamp to field bounds
-        position.x = max(-FieldLayout.halfWidth + 0.15, min(FieldLayout.halfWidth - 0.15, position.x))
-        position.y = max(-FieldLayout.halfLength + 0.15, min(FieldLayout.halfLength - 0.15, position.y))
+        // Clamp to field bounds (with bumper clearance)
+        let wallMargin: Float = 0.20
+        position.x = max(-FieldLayout.halfWidth + wallMargin, min(FieldLayout.halfWidth - wallMargin, position.x))
+        position.y = max(-FieldLayout.halfLength + wallMargin, min(FieldLayout.halfLength - wallMargin, position.y))
 
-        // Soft repulsion from center obstacle
+        // Hard repulsion from center obstacle
         if abs(position.x) < obstacleHalf && abs(position.y) < obstacleSpanHalf {
-            position.x += (position.x >= 0 ? 0.02 : -0.02)
+            let pushStrength: Float = 0.04
+            position.x += (position.x >= 0 ? pushStrength : -pushStrength)
+        }
+
+        // Hard repulsion from reef centers
+        for center in [FieldSpec.redReefCenter, FieldSpec.blueReefCenter] {
+            let reefDist = distance2D(position, center)
+            let hardReefRadius = FieldSpec.reefApothem + 0.15
+            if reefDist < hardReefRadius && reefDist > 0.01 {
+                let nx = (position.x - center.x) / reefDist
+                let nz = (position.y - center.y) / reefDist
+                let pushOut = (hardReefRadius - reefDist) * 0.6
+                position.x += nx * pushOut
+                position.y += nz * pushOut
+            }
         }
     }
 
@@ -351,28 +381,28 @@ class RobotAgent {
         }
 
         // Animate mechanism during scoring
+        // Clearance: swerve=0.064, tank=0.076
+        let wheelClearance: Float = config.build.drivetrain == .swerve ? 0.064 : 0.076
+        let deckHeight: Float = 0.06
+        let mechBaseY: Float = wheelClearance + deckHeight + 0.06
+
         if state == .scoring, let mech = mechanismNode {
             if mech.name == "elevator_stage" {
-                // Extend elevator upward based on target level
                 let targetY: Float
                 switch currentTargetLevel {
-                case 1: targetY = 0.08   // base position
-                case 2: targetY = 0.14
-                case 3: targetY = 0.22
-                default: targetY = 0.30  // L4 full extension
+                case 1: targetY = mechBaseY + 0.02
+                case 2: targetY = mechBaseY + 0.10
+                case 3: targetY = mechBaseY + 0.18
+                default: targetY = mechBaseY + 0.26
                 }
-                let baseY = config.build.mechanism == .elevator ? Float(0.08) : Float(0.08)
-                mech.position.y += (targetY + baseY - mech.position.y) * 0.08
+                mech.position.y += (targetY - mech.position.y) * 0.08
             } else if mech.name == "pivot_arm" {
-                // Tilt arm forward during scoring
-                let targetAngle: Float = -0.4  // tilt forward
+                let targetAngle: Float = -0.4
                 mech.eulerAngles.x += (targetAngle - mech.eulerAngles.x) * 0.06
             }
         } else if let mech = mechanismNode {
-            // Return to rest position when not scoring
             if mech.name == "elevator_stage" {
-                let baseY: Float = 0.08 + 0.08
-                mech.position.y += (baseY - mech.position.y) * 0.05
+                mech.position.y += (mechBaseY - mech.position.y) * 0.05
             } else if mech.name == "pivot_arm" {
                 mech.eulerAngles.x += (0.35 - mech.eulerAngles.x) * 0.05
             }
@@ -404,7 +434,7 @@ final class MatchEngine: ObservableObject {
     let configs: [RobotConfig]
     let playerAutoPlan: AutoPlan
     var redPolicy: StrategyPolicy
-    let bluePolicy = StrategyPolicy(scoringWeight: 0.6, defenseWeight: 0.2, endgameWeight: 0.2)
+    let bluePolicy: StrategyPolicy
 
     var agents: [RobotAgent] = []
     var rng: SeededRNG
@@ -416,11 +446,15 @@ final class MatchEngine: ObservableObject {
     private var lastUpdateTime: Date?
     private var scene: SCNScene?
     private var reefNodeTargets: [SCNNode] = []
+    private var lastCollisionParticleTime: Double = 0
+    private var lastPeriod: MatchPeriod = .auto
 
-    init(configs: [RobotConfig], strategy: AllianceStrategy, playerAuto: AutoPlan, seed: UInt64 = 42) {
+    init(configs: [RobotConfig], strategy: AllianceStrategy, playerAuto: AutoPlan,
+         seed: UInt64 = 42, bluePolicy: StrategyPolicy? = nil) {
         self.configs = configs
         self.playerAutoPlan = playerAuto
         self.redPolicy = strategy.basePolicy
+        self.bluePolicy = bluePolicy ?? StrategyPolicy(scoringWeight: 0.6, defenseWeight: 0.2, endgameWeight: 0.2)
         self.rng = SeededRNG(seed: seed)
 
         for config in configs {
@@ -452,6 +486,12 @@ final class MatchEngine: ObservableObject {
         simTime = 0
         lastUpdateTime = Date()
         strategyMode = redPolicy.dominantMode
+        SoundManager.shared.play(.matchStart)
+
+        if let scene = scene {
+            ParticleManager.emit(ParticleManager.matchStartFlash(),
+                                  at: SCNVector3(0, 0.5, 0), in: scene)
+        }
 
         updateTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -485,7 +525,8 @@ final class MatchEngine: ObservableObject {
         guard canUseCallout(callout) else { return }
         calloutsUsed.append(callout)
         activeCallouts.insert(callout)
-        calloutCooldown = 5.0  // 5-second cooldown between callouts
+        calloutCooldown = 5.0
+        SoundManager.shared.play(.callout)
 
         // Record event for decision map
         calloutEvents.append(CalloutEvent(
@@ -594,6 +635,7 @@ final class MatchEngine: ObservableObject {
         let simDt = clampedWallDt * speedMultiplier
         simTime += simDt
 
+        let previousPeriod = period
         if simTime < MatchTiming.teleopStart {
             period = .auto
         } else if simTime < MatchTiming.endgameStart {
@@ -603,6 +645,21 @@ final class MatchEngine: ObservableObject {
         } else {
             finishMatch()
             return
+        }
+
+        // Period transition sound
+        if period != previousPeriod && previousPeriod != .finished {
+            SoundManager.shared.play(.periodChange)
+        }
+
+        // Countdown beeps in last 5 seconds
+        let remaining = MatchTiming.totalDuration - simTime
+        if remaining <= 5.0 && remaining > 0 {
+            let sec = Int(remaining)
+            let prevRemaining = MatchTiming.totalDuration - (simTime - simDt)
+            if Int(prevRemaining) != sec {
+                SoundManager.shared.play(.countdown)
+            }
         }
 
         if isSlowMo {
@@ -895,8 +952,15 @@ final class MatchEngine: ObservableObject {
                         let pts = isAuto ? FieldSpec.Scoring.autoProcessor : FieldSpec.Scoring.teleopProcessor
                         addScore(alliance: agent.config.alliance, points: pts,
                                  period: isAuto ? .auto : .teleop, isProcessor: true)
+                        SoundManager.shared.play(.score)
+                        if let scene = scene {
+                            let pos = SCNVector3(agent.position.x, 0.15, agent.position.y)
+                            ParticleManager.emit(ParticleManager.scoreParticles(color: agent.config.alliance.uiColor),
+                                                  at: pos, in: scene)
+                        }
+                    } else {
+                        SoundManager.shared.play(.miss)
                     }
-                    // Processor doesn't show ring arc
                 } else {
                     // Compute target position for ring projectile
                     let reefCenter = agent.config.alliance == .red
@@ -914,13 +978,23 @@ final class MatchEngine: ObservableObject {
                         let pts = scoringPoints(level: level, isAuto: isAuto)
                         addScore(alliance: agent.config.alliance, points: pts,
                                  period: isAuto ? .auto : .teleop, reefLevel: level)
+                        SoundManager.shared.play(.score)
+                        if let scene = scene {
+                            let h: Float = level >= 3 ? FieldSpec.branchL3 : 0.15
+                            let pos = SCNVector3(agent.position.x, h, agent.position.y)
+                            let particles = level >= 3
+                                ? ParticleManager.highScoreParticles(alliance: agent.config.alliance.uiColor)
+                                : ParticleManager.scoreParticles(color: agent.config.alliance.uiColor)
+                            ParticleManager.emit(particles, at: pos, in: scene)
+                        }
+                    } else {
+                        SoundManager.shared.play(.miss)
                     }
                 }
             }
             agent.state = .idle
 
         case .climbing:
-            // Award endgame points based on climb type
             let pts: Int
             if agent.config.stats.canDeepClimb {
                 pts = FieldSpec.Scoring.deepClimb
@@ -930,6 +1004,12 @@ final class MatchEngine: ObservableObject {
             addScore(alliance: agent.config.alliance, points: pts, period: .endgame)
             agent.isParkedEndgame = true
             agent.state = .parked
+            SoundManager.shared.play(.climb)
+            if let scene = scene {
+                ParticleManager.emit(
+                    ParticleManager.climbParticles(color: agent.config.alliance.uiColor),
+                    at: SCNVector3(agent.position.x, 0.1, agent.position.y), in: scene)
+            }
 
         case .parked:
             break
@@ -1014,6 +1094,11 @@ final class MatchEngine: ObservableObject {
         agent.stallTimer = duration
         agent.state = .stalled
         agent.speed = 0
+        SoundManager.shared.play(.stall)
+        if let scene = scene {
+            let pos = SCNVector3(agent.position.x, 0.12, agent.position.y)
+            ParticleManager.emit(ParticleManager.stallSmoke(), at: pos, in: scene)
+        }
     }
 
     // MARK: - Separation (with push power)
@@ -1051,11 +1136,20 @@ final class MatchEngine: ObservableObject {
                         if agents[j].config.role == .defender {
                             agents[i].speed *= 0.3
                         }
-                        // Push power advantage slows the weaker bot
                         if pushI > pushJ * 1.5 {
                             agents[j].speed *= 0.5
                         } else if pushJ > pushI * 1.5 {
                             agents[i].speed *= 0.5
+                        }
+
+                        // Collision particles (rate-limited)
+                        if let scene = scene, simTime - lastCollisionParticleTime > 0.5 {
+                            let midX = (agents[i].position.x + agents[j].position.x) / 2
+                            let midZ = (agents[i].position.y + agents[j].position.y) / 2
+                            ParticleManager.emit(ParticleManager.collisionSparks(),
+                                                  at: SCNVector3(midX, 0.06, midZ), in: scene)
+                            SoundManager.shared.play(.collision)
+                            lastCollisionParticleTime = simTime
                         }
                     }
                 }
@@ -1288,6 +1382,7 @@ final class MatchEngine: ObservableObject {
         stop()
         period = .finished
         isFinished = true
+        SoundManager.shared.play(.matchEnd)
     }
 
     // MARK: - Result

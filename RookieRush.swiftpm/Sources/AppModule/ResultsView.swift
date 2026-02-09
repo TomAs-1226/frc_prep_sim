@@ -5,6 +5,7 @@ import SwiftUI
 /// Post-match results with score breakdown, build choices, and AI coaching feedback.
 struct ResultsView: View {
     let result: MatchResult
+    var tournament: TournamentState?
     let onTryAgain: () -> Void
 
     @StateObject private var coach = AICoach()
@@ -45,11 +46,27 @@ struct ResultsView: View {
                     coachingCard
                         .padding(.horizontal, 20)
 
+                    // Build recommendation
+                    buildRecommendationCard
+                        .padding(.horizontal, 20)
+
+                    // Tournament progress (if applicable)
+                    if let ts = tournament, !ts.isComplete {
+                        tournamentProgressCard(ts)
+                            .padding(.horizontal, 20)
+                    }
+
                     Button(action: onTryAgain) {
                         HStack(spacing: 8) {
-                            Image(systemName: "arrow.counterclockwise")
-                            Text("Try Different Strategy")
-                                .font(.headline)
+                            if let ts = tournament, !ts.isComplete {
+                                Image(systemName: "play.fill")
+                                Text("Next Match (\(ts.currentMatchIndex + 1)/\(ts.config.matchCount))")
+                                    .font(.headline)
+                            } else {
+                                Image(systemName: "arrow.counterclockwise")
+                                Text("Try Different Strategy")
+                                    .font(.headline)
+                            }
                         }
                         .foregroundStyle(.black)
                         .frame(maxWidth: 280)
@@ -60,12 +77,8 @@ struct ResultsView: View {
                         )
                         .modifier(GlassModifier(shape: RoundedRectangle(cornerRadius: 14)))
                     }
-                    .accessibilityLabel("Try again with different strategy choices")
-
-                    Text("Demo Level 1 — future levels will be more in-depth")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.white.opacity(0.2))
-                        .padding(.bottom, 40)
+                    .accessibilityLabel("Continue")
+                    .padding(.bottom, 40)
                 }
             }
         }
@@ -527,6 +540,125 @@ struct ResultsView: View {
         let m = Int(remaining) / 60
         let s = Int(remaining) % 60
         return String(format: "%d:%02d", m, s)
+    }
+
+    // MARK: - Build Recommendation
+
+    @ViewBuilder
+    private var buildRecommendationCard: some View {
+        let rec = buildRecommendation
+        if !rec.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "wrench.and.screwdriver.fill")
+                        .foregroundStyle(.cyan)
+                    Text("Build Suggestion")
+                        .font(.caption.bold())
+                        .foregroundStyle(.cyan)
+                }
+
+                Text(rec)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(3)
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.cyan.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(Color.cyan.opacity(0.15), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    private var buildRecommendation: String {
+        let build = result.playerBuild
+        var lines: [String] = []
+
+        // Specific build combos
+        if build.mechanism == .elevator && build.intake == .roller {
+            lines.append("Elevator + Roller is high-risk: consider Claw intake for the reliability bump, since elevator scoring is already slow.")
+        }
+        if build.drivetrain == .swerve && result.playerRole == .defender {
+            lines.append("Swerve drive has low push power for defense. Tank drive gives +40% pushing force and deep climb (12pts vs 6pts).")
+        }
+        if build.mechanism == .simple && result.playerRole == .scorer {
+            lines.append("Simple mechanism caps at L2. Switch to Arm (L3) or Elevator (L4) to unlock higher-value scoring as a Scorer.")
+        }
+
+        if result.didPlayerStall && build.tuning.mechanismTuning < 0.4 {
+            lines.append("Your mechanism tuning is speed-biased. Increase precision to reduce stall chance.")
+        }
+
+        if result.playerRobotScored < 3 && build.tuning.gearRatio > 0.7 {
+            lines.append("Speed-biased gear ratio didn't translate to scores. Try balanced (50%) for better acceleration to and from scoring positions.")
+        }
+
+        return lines.joined(separator: " ")
+    }
+
+    // MARK: - Tournament Progress
+
+    @ViewBuilder
+    private func tournamentProgressCard(_ ts: TournamentState) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "trophy.fill")
+                    .foregroundStyle(.yellow)
+                Text("\(ts.config.name) Progress")
+                    .font(.caption.bold())
+                    .foregroundStyle(.yellow)
+            }
+
+            HStack(spacing: 16) {
+                VStack(spacing: 2) {
+                    Text("\(ts.wins)")
+                        .font(.title3.bold())
+                        .foregroundStyle(.green)
+                    Text("Wins")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+                VStack(spacing: 2) {
+                    Text("\(ts.losses)")
+                        .font(.title3.bold())
+                        .foregroundStyle(.red)
+                    Text("Losses")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+                VStack(spacing: 2) {
+                    Text("\(ts.ties)")
+                        .font(.title3.bold())
+                        .foregroundStyle(.orange)
+                    Text("Ties")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+                Spacer()
+                VStack(spacing: 2) {
+                    Text("\(ts.currentMatchIndex)/\(ts.config.matchCount)")
+                        .font(.title3.bold())
+                        .foregroundStyle(.white)
+                    Text("Played")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.yellow.opacity(0.06))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.yellow.opacity(0.15), lineWidth: 1)
+                )
+        )
     }
 
     // MARK: - Coaching Card

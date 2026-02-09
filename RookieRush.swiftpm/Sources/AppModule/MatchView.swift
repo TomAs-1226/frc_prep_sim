@@ -10,25 +10,34 @@ struct MatchView: View {
     let playerBuild: RobotBuild
     let autoPlan: AutoPlan
     let onFinish: (MatchResult) -> Void
+    let seed: UInt64
+    let bluePolicy: StrategyPolicy?
 
     @StateObject private var engine: MatchEngine
     @State private var sceneView: SCNView?
     @State private var scene: SCNScene?
     @State private var hasStarted = false
+    @AppStorage("soundEnabled") private var soundEnabled: Bool = true
 
     init(strategy: AllianceStrategy, playerRole: RobotRole, playerBuild: RobotBuild,
-         autoPlan: AutoPlan, onFinish: @escaping (MatchResult) -> Void) {
+         autoPlan: AutoPlan, seed: UInt64 = 42, bluePolicy: StrategyPolicy? = nil,
+         onFinish: @escaping (MatchResult) -> Void) {
         self.strategy = strategy
         self.playerRole = playerRole
         self.playerBuild = playerBuild
         self.autoPlan = autoPlan
         self.onFinish = onFinish
+        self.seed = seed
+        self.bluePolicy = bluePolicy
 
-        let configs = RobotFactory.buildRobots(
-            playerRole: playerRole, strategy: strategy, playerBuild: playerBuild
+        let configs = MatchGenerator.generateMatch(
+            playerRole: playerRole, strategy: strategy,
+            playerBuild: playerBuild, seed: seed,
+            bluePolicy: bluePolicy
         )
         _engine = StateObject(wrappedValue: MatchEngine(
-            configs: configs, strategy: strategy, playerAuto: autoPlan
+            configs: configs, strategy: strategy, playerAuto: autoPlan,
+            seed: seed, bluePolicy: bluePolicy
         ))
     }
 
@@ -105,9 +114,9 @@ struct MatchView: View {
                     .animation(.easeInOut(duration: 0.3), value: engine.isSlowMo)
 
                 // Footer text
-                Text("Demo Level 1 — future levels will be more in-depth")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(0.2))
+                Text("Seed: \(seed)")
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.15))
                     .padding(.bottom, 4)
 
                 // Bottom controls
@@ -123,6 +132,7 @@ struct MatchView: View {
             }
         }
         .onAppear {
+            SoundManager.shared.setEnabled(soundEnabled)
             if !hasStarted {
                 hasStarted = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
